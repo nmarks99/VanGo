@@ -1,4 +1,4 @@
-## VanGo Firmware
+# VanGo Firmware
 
 ## Build & Flash
 To build and flash the code run the following
