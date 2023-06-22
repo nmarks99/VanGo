@@ -13,11 +13,7 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 use esp_idf_hal::ledc::LedcDriver;
 use esp_idf_hal::ledc::config::TimerConfig;
 
-
-// linear mapping between two ranges, similar to arduino's map function
-fn map(x:u32, xmin:u32, xmax:u32, ymin:u32, ymax:u32) -> u32 {
-    x*(ymax-ymin) / (xmax - xmin) + ymin
-}
+mod utils;
 
 
 // these values were obtained experimentally
@@ -58,7 +54,7 @@ fn main() -> anyhow::Result<()> {
     // Control duty cycle (servo position) with adc value (potentiometer)
     loop {
         let adc_val: u16 = adc.read(&mut adc_pin).unwrap();
-        channel.set_duty(map(adc_val.into(), POT_MIN, POT_MAX, SERVO_MIN, SERVO_MAX))?; 
+        channel.set_duty(utils::map(adc_val.into(), POT_MIN, POT_MAX, SERVO_MIN, SERVO_MAX))?; 
         if adc_val == POT_MAX as u16 {
             led.set_high()?;
         }
