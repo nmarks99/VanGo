@@ -2,12 +2,12 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
 use esp_idf_hal::delay::FreeRtos;
 
-use esp_idf_hal::gpio;
+// use esp_idf_hal::gpio;
 use esp_idf_hal::gpio::PinDriver;
 
-use esp_idf_hal::adc;
-use esp_idf_hal::adc::AdcChannelDriver;
-use esp_idf_hal::adc::AdcDriver;
+// use esp_idf_hal::adc;
+// use esp_idf_hal::adc::AdcChannelDriver;
+// use esp_idf_hal::adc::AdcDriver;
 
 use esp_idf_hal::ledc::LedcTimerDriver;
 use esp_idf_hal::ledc::LedcDriver;
@@ -17,10 +17,10 @@ mod utils;
 
 
 // these values were obtained experimentally
-const POT_MIN: u32 = 128;
-const POT_MAX: u32 = 3139;
-const SERVO_MIN: u32 = 5;
-const SERVO_MAX: u32 = 32;
+// const POT_MIN: u32 = 128;
+// const POT_MAX: u32 = 3139;
+// const SERVO_MIN: u32 = 5;
+// const SERVO_MAX: u32 = 32;
 
 
 fn main() -> anyhow::Result<()> {
@@ -30,18 +30,8 @@ fn main() -> anyhow::Result<()> {
     // this is the builtin LED
     let mut led = PinDriver::output(peripherals.pins.gpio25)?;
 
-    // configure ADC2
-    let mut adc = AdcDriver::new(
-        peripherals.adc2,
-        &adc::config::Config::new().calibration(true)
-    )?;
-    
-    // setup GPIO4 as the ADC pin
-    let mut adc_pin: AdcChannelDriver<'_, gpio::Gpio4, adc::Atten11dB<_>> =
-        adc::AdcChannelDriver::new(peripherals.pins.gpio4)?;
-
     // configure PWM pin on GPIO2
-    let mut channel = LedcDriver::new(
+    let mut pwm_pin = LedcDriver::new(
         peripherals.ledc.channel0,
         LedcTimerDriver::new(
             peripherals.ledc.timer0,
@@ -50,18 +40,33 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio16
     )?;
 
+    // configure GPIO13 and GPIO12 to be inputs for encoder A and B
+    // let enc_a = PinDriver::input(peripherals.pins.gpio13)?;
+    // let enc_a = PinDriver::input(peripherals.pins.gpio12)?;
+
+    // GPIO14 sets motor direction
+    let mut motor_dir = PinDriver::output(peripherals.pins.gpio14)?;
+    motor_dir.set_low()?;
     
-    // Control duty cycle (servo position) with adc value (potentiometer)
+    let max_duty = pwm_pin.get_max_duty();
+
     loop {
-        let adc_val: u16 = adc.read(&mut adc_pin).unwrap();
-        channel.set_duty(utils::map(adc_val.into(), POT_MIN, POT_MAX, SERVO_MIN, SERVO_MAX))?; 
-        if adc_val == POT_MAX as u16 {
+
+        for duty in (0..max_duty).step_by(20) {
             led.set_high()?;
+            pwm_pin.set_duty(duty)?;
+            println!("Duty cycle = {duty}");
+            FreeRtos::delay_ms(1000);
         }
-        else {
+
+        for duty in (0..max_duty+20).rev().step_by(20) {
             led.set_low()?;
+            pwm_pin.set_duty(duty)?;
+            println!("Duty cycle = {duty}");
+            FreeRtos::delay_ms(1000);
         }
-        FreeRtos::delay_ms(10);
+
+        FreeRtos::delay_ms(1);
     }
 
 }
