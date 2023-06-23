@@ -5,6 +5,8 @@ target = "xtensa-esp32-espidf"
 linker = "ldproxy"
 # runner = "espflash --monitor" # Select this runner for espflash v1.x.x
 runner = "espflash" # Select this runner for espflash v2.x.x
+rustflags = ["-C", "default-linker-libraries"]
+
 
 [unstable]
 build-std = ["std", "panic_abort"]
