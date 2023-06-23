@@ -23,7 +23,6 @@ const GEAR_RATIO: u32 = 150;
 const ENCODER_MULT: u32 = 14;
 
 
-
 // use esp_idf_sys::{
 //     esp, gpio_config, gpio_config_t, gpio_install_isr_service, gpio_int_type_t_GPIO_INTR_POSEDGE,
 //     gpio_isr_handler_add, gpio_mode_t_GPIO_MODE_INPUT, xQueueGenericCreate, xQueueGiveFromISR,
