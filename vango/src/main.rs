@@ -5,16 +5,16 @@ use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::gpio;
 use esp_idf_hal::gpio::PinDriver;
 
-// use esp_idf_hal::adc;
-// use esp_idf_hal::adc::AdcChannelDriver;
-// use esp_idf_hal::adc::AdcDriver;
+use esp_idf_hal::adc;
+use esp_idf_hal::adc::AdcChannelDriver;
+use esp_idf_hal::adc::AdcDriver;
+use esp_idf_hal::adc::Atten11dB;
 
 use esp_idf_hal::ledc::LedcTimerDriver;
 use esp_idf_hal::ledc::LedcDriver;
 use esp_idf_hal::ledc::config::TimerConfig;
 use esp_idf_svc::systime::EspSystemTime;
 // use esp_idf_svc::notify::EspNotify;
-// use critical_section::{Mutex, CriticalSection};
 use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 
 mod utils;
@@ -24,6 +24,9 @@ mod utils;
 const GEAR_RATIO: u32 = 150;
 const ENCODER_MULT: u32 = 14;
 
+// these values were obtained experimentally
+const POT_MIN: u32 = 128;
+const POT_MAX: u32 = 3139;
 
 static LAST_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
 static ELAPSED_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
@@ -50,6 +53,14 @@ fn main() -> anyhow::Result<()> {
     )?;
     let max_duty = pwm_pin.get_max_duty();
 
+    // Setup analog input for potentiometer
+    let mut adc_driver = AdcDriver::new(
+        peripherals.adc2,
+        &adc::config::Config::new().calibration(true)
+    )?;
+    let mut pot: AdcChannelDriver<'_, gpio::Gpio4, Atten11dB<_>> =
+        adc::AdcChannelDriver::new(peripherals.pins.gpio4)?;
+
     // GPIO14 sets motor direction
     let mut motor_dir = PinDriver::output(peripherals.pins.gpio14)?;
     motor_dir.set_low()?;
@@ -74,21 +85,25 @@ fn main() -> anyhow::Result<()> {
     }
 
     // set motor speed
-    pwm_pin.set_duty(max_duty)?;
+    pwm_pin.set_duty(0)?;
 
     loop {
-        FreeRtos::delay_ms(100);
+        FreeRtos::delay_ms(50);
+        let pot_val = adc_driver.read(&mut pot).unwrap();
+        let duty = utils::map(pot_val.into(), POT_MIN, POT_MAX, 0, max_duty);
+        pwm_pin.set_duty(duty.into())?;
         let rpm = get_motor_rpm();
-        println!("speed = {} rpm", rpm);
+        println!("duty = {}%, speed = {} rpm", (100*duty/max_duty), rpm);
     }
 
 }
 
+// Calculates motor speed by doing an atomic read of
+// the elapsed time between encoder interrupts
 fn get_motor_rpm() -> f32 {
     let mut rpm: f32; 
     if ENC_INTERRUPT_FLAG.load(Ordering::SeqCst) {
         let elapsed = ELAPSED_TIME_ATOMIC.load(Ordering::SeqCst);
-        println!("{}",elapsed);
         if elapsed == 0 {
             rpm = 0.0
         }
