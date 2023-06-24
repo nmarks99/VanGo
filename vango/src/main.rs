@@ -12,7 +12,7 @@ use esp_idf_hal::gpio::PinDriver;
 use esp_idf_hal::ledc::LedcTimerDriver;
 use esp_idf_hal::ledc::LedcDriver;
 use esp_idf_hal::ledc::config::TimerConfig;
-// use esp_idf_svc::systime::EspSystemTime;
+use esp_idf_svc::systime::EspSystemTime;
 // use esp_idf_svc::notify::EspNotify;
 // use critical_section::{Mutex, CriticalSection};
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -25,7 +25,8 @@ mod utils;
 // const ENCODER_MULT: u32 = 14;
 
 
-static VALUE_ATOMIC: AtomicU32 = AtomicU32::new(0);
+static LAST_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
+static ELAPSED_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -35,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     // let mut led = PinDriver::output(peripherals.pins.gpio25)?;
 
     // system timer to get uptime
-    // let sys_timer = EspSystemTime {};
+    let sys_timer = EspSystemTime {};
 
     // configure PWM pin on GPIO2
     let mut pwm_pin = LedcDriver::new(
@@ -54,27 +55,30 @@ fn main() -> anyhow::Result<()> {
 
     // set up interrupt on enc A
     let mut enc_a_driver = PinDriver::input(peripherals.pins.gpio13)?;
-    let pin_number = enc_a_driver.pin(); 
-
+    let pin_number = enc_a_driver.pin();
     enc_a_driver.set_pull(gpio::Pull::Up)?;
     enc_a_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
-    
-    
+
     // ISR
     unsafe {
         enc_a_driver.subscribe(move || {
             // let new_value = esp_idf_sys::gpio_get_level(pin_number) as u32;
-            VALUE_ATOMIC.store(new_value, Ordering::SeqCst);
+            let current_time = sys_timer.now().as_micros() as u32;
+            let last_time = LAST_TIME_ATOMIC.load(Ordering::SeqCst);
+            if last_time < current_time {
+                LAST_TIME_ATOMIC.store(current_time, Ordering::SeqCst);
+                ELAPSED_TIME_ATOMIC.store((current_time-last_time), Ordering::SeqCst);
+            }
         })?;
     }
-    
+
     // set motor speed
     pwm_pin.set_duty(max_duty/2)?;
-    
+
     loop {
         FreeRtos::delay_ms(50);
-        let value = VALUE_ATOMIC.load(Ordering::SeqCst);
-        println!("Value = {}", value);
+        let elapsed = ELAPSED_TIME_ATOMIC.load(Ordering::SeqCst);
+        println!("elapsed time = {} us", elapsed);
 
     }
 
