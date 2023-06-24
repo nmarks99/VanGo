@@ -73,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // set motor speed
-    pwm_pin.set_duty(max_duty/2)?;
+    pwm_pin.set_duty(max_duty)?;
 
     loop {
         FreeRtos::delay_ms(50);
