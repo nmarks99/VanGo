@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-
 // basics
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use esp_idf_hal::delay::FreeRtos;
@@ -28,6 +24,7 @@ use esp_idf_svc::systime::EspSystemTime;
 
 // RMT
 use esp_idf_hal::rmt;
+use esp_idf_hal::rmt::TxRmtDriver;
 
 // user modules
 mod neopixel;
@@ -51,41 +48,48 @@ fn main() -> anyhow::Result<()> {
 
     // neopixel on GPIO12
     let rmt_config = rmt::config::TransmitConfig::new().clock_divider(1);
-    let mut rmt_tx = rmt::TxRmtDriver::new(
+    let mut rmt_tx = TxRmtDriver::new(
         peripherals.rmt.channel0,
         peripherals.pins.gpio12,
         &rmt_config,
     )?;
 
+    // Set neopixel to blue, ~25% brightness
+    neopixel::set_rgb(Rgb::new(0, 0, 51), &mut rmt_tx)?;
+
     // system timer to get uptime
     let sys_timer = EspSystemTime {};
 
     // configure PWM pin on GPIO2
-    let mut pwm_pin = LedcDriver::new(
+    let mut pwm_pin1 = LedcDriver::new(
         peripherals.ledc.channel0,
         LedcTimerDriver::new(
             peripherals.ledc.timer0,
             &TimerConfig::new().frequency(50.Hz().into()),
         )?,
-        peripherals.pins.gpio16,
+        peripherals.pins.gpio15,
     )?;
-    let max_duty = pwm_pin.get_max_duty();
 
-    // Setup analog input for potentiometer
+    // GPIO14 sets motor direction
+    let mut motor_dir = PinDriver::output(peripherals.pins.gpio32)?;
+    motor_dir.set_low()?;
+
+    let max_duty = pwm_pin1.get_max_duty();
+
+    // Setup adc driver
     let mut adc_driver = AdcDriver::new(
         peripherals.adc2,
         &adc::config::Config::new().calibration(true),
     )?;
-    let mut pot: AdcChannelDriver<'_, gpio::Gpio4, Atten11dB<_>> =
-        adc::AdcChannelDriver::new(peripherals.pins.gpio4)?;
 
-    // GPIO14 sets motor direction
-    let mut motor_dir = PinDriver::output(peripherals.pins.gpio14)?;
-    motor_dir.set_low()?;
+    // setup analog input for pot1 and pot2
+    let mut pot1: AdcChannelDriver<'_, gpio::Gpio26, Atten11dB<_>> =
+        adc::AdcChannelDriver::new(peripherals.pins.gpio26)?;
+    let mut pot2: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
+        adc::AdcChannelDriver::new(peripherals.pins.gpio25)?;
 
     // set up interrupt on enc A
-    let mut enc_a_driver = PinDriver::input(peripherals.pins.gpio13)?;
-    // let pin_number = enc_a_driver.pin();
+    let mut enc_a_driver = PinDriver::input(peripherals.pins.gpio27)?;
     enc_a_driver.set_pull(gpio::Pull::Up)?;
     enc_a_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
 
@@ -103,33 +107,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     // set motor speed
-    pwm_pin.set_duty(0)?;
+    pwm_pin1.set_duty(max_duty)?;
 
     loop {
-        neopixel::set_color("red", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        neopixel::set_color("green", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        neopixel::set_color("blue", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        neopixel::set_color("yellow", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        neopixel::set_color("cyan", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        neopixel::set_color("purple", &mut rmt_tx)?;
-        FreeRtos::delay_ms(200);
-
-        // FreeRtos::delay_ms(100);
-        // let pot_val = adc_driver.read(&mut pot).unwrap();
-        // let duty = utils::map(pot_val.into(), POT_MIN, POT_MAX, 0, max_duty);
-        // pwm_pin.set_duty(duty.into())?;
-        // let rpm = get_motor_rpm();
-        // println!("duty = {}%, speed = {} rpm", (100 * duty / max_duty), rpm);
+        FreeRtos::delay_ms(50);
+        let pot1_val = adc_driver.read(&mut pot1).unwrap();
+        let pot2_val = adc_driver.read(&mut pot2).unwrap();
+        let duty1 = utils::map(pot1_val.into(), POT_MIN, POT_MAX, 0, max_duty);
+        let duty2 = utils::map(pot2_val.into(), POT_MIN, POT_MAX, 0, max_duty);
+        pwm_pin1.set_duty(duty1.into())?;
+        let rpm1 = get_motor_rpm();
+        println!("duty = {}%, speed = {} rpm", (100 * duty1 / max_duty), rpm1);
     }
 }
 

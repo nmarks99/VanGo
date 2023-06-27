@@ -2,9 +2,6 @@
 
 use anyhow;
 use core::time::Duration;
-use esp_idf_hal::gpio;
-use esp_idf_hal::peripherals;
-use esp_idf_hal::rmt;
 use esp_idf_hal::rmt::PinState;
 use esp_idf_hal::rmt::TxRmtDriver;
 use esp_idf_hal::rmt::{FixedLengthSignal, Pulse};
