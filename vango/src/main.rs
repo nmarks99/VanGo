@@ -24,7 +24,7 @@ use esp_idf_svc::systime::EspSystemTime;
 
 // user modules
 mod neopixel;
-use neopixel::Rgb;
+// use neopixel::Rgb;
 use neopixel::Neopixel;
 mod utils;
 
@@ -35,9 +35,13 @@ const ENCODER_MULT: u32 = 14;
 const POT_MIN: u32 = 128;
 const POT_MAX: u32 = 3139;
 
-static LAST_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
-static ELAPSED_TIME_ATOMIC: AtomicU32 = AtomicU32::new(0);
-static ENC_INTERRUPT_FLAG: AtomicBool = AtomicBool::new(false);
+static LAST_TIME_ATOMIC1: AtomicU32 = AtomicU32::new(0);
+static ELAPSED_TIME_ATOMIC1: AtomicU32 = AtomicU32::new(0);
+static ENC_INTERRUPT_FLAG1: AtomicBool = AtomicBool::new(false);
+
+static LAST_TIME_ATOMIC2: AtomicU32 = AtomicU32::new(0);
+static ELAPSED_TIME_ATOMIC2: AtomicU32 = AtomicU32::new(0);
+static ENC_INTERRUPT_FLAG2: AtomicBool = AtomicBool::new(false);
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -48,16 +52,27 @@ fn main() -> anyhow::Result<()> {
     neo.set_color("cyan", 0.2)?;
 
     // system timer to get uptime
-    let sys_timer = EspSystemTime {};
+    let sys_timer1 = EspSystemTime {};
+    let sys_timer2 = EspSystemTime {};
 
-    // configure PWM pin on GPIO2
+    // configure PWM on GPIO15 for motor 1
     let mut pwm_pin1 = LedcDriver::new(
         peripherals.ledc.channel0,
         LedcTimerDriver::new(
             peripherals.ledc.timer0,
-            &TimerConfig::new().frequency(50.Hz().into()),
+            &TimerConfig::new().frequency(80.Hz().into()),
         )?,
         peripherals.pins.gpio15,
+    )?;
+
+    // configure PWM on GPIO23 for motor 1
+    let mut pwm_pin2 = LedcDriver::new(
+        peripherals.ledc.channel1,
+        LedcTimerDriver::new(
+            peripherals.ledc.timer1,
+            &TimerConfig::new().frequency(80.Hz().into()),
+        )?,
+        peripherals.pins.gpio23,
     )?;
 
     // GPIO14 sets motor direction
@@ -78,21 +93,40 @@ fn main() -> anyhow::Result<()> {
     let mut pot2: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
         adc::AdcChannelDriver::new(peripherals.pins.gpio25)?;
 
-    // set up interrupt on enc A
-    let mut enc_a_driver = PinDriver::input(peripherals.pins.gpio27)?;
-    enc_a_driver.set_pull(gpio::Pull::Up)?;
-    enc_a_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
+    // set up interrupt on enc A for first motor
+    let mut m1_enc_driver = PinDriver::input(peripherals.pins.gpio27)?;
+    m1_enc_driver.set_pull(gpio::Pull::Up)?;
+    m1_enc_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
 
-    // ISR
+    // set up interrupt on enc A for second motor
+    let mut m2_enc_driver = PinDriver::input(peripherals.pins.gpio14)?;
+    m2_enc_driver.set_pull(gpio::Pull::Up)?;
+    m2_enc_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
+
+
+    // ISR for motor 1 encoder
     unsafe {
-        enc_a_driver.subscribe(move || {
-            ENC_INTERRUPT_FLAG.store(true, Ordering::SeqCst);
-            let current_time = sys_timer.now().as_micros() as u32;
-            let last_time = LAST_TIME_ATOMIC.load(Ordering::SeqCst);
+        m1_enc_driver.subscribe(move || {
+            ENC_INTERRUPT_FLAG1.store(true, Ordering::SeqCst);
+            let current_time = sys_timer1.now().as_micros() as u32;
+            let last_time = LAST_TIME_ATOMIC1.load(Ordering::SeqCst);
             if last_time < current_time {
-                ELAPSED_TIME_ATOMIC.store(current_time - last_time, Ordering::SeqCst);
+                ELAPSED_TIME_ATOMIC1.store(current_time - last_time, Ordering::SeqCst);
             }
-            LAST_TIME_ATOMIC.store(current_time, Ordering::SeqCst);
+            LAST_TIME_ATOMIC1.store(current_time, Ordering::SeqCst);
+        })?;
+    }
+
+    // ISR for motor 2 encoder
+    unsafe {
+        m2_enc_driver.subscribe(move || {
+            ENC_INTERRUPT_FLAG2.store(true, Ordering::SeqCst);
+            let current_time = sys_timer2.now().as_micros() as u32;
+            let last_time = LAST_TIME_ATOMIC2.load(Ordering::SeqCst);
+            if last_time < current_time {
+                ELAPSED_TIME_ATOMIC2.store(current_time - last_time, Ordering::SeqCst);
+            }
+            LAST_TIME_ATOMIC2.store(current_time, Ordering::SeqCst);
         })?;
     }
 
@@ -101,29 +135,56 @@ fn main() -> anyhow::Result<()> {
 
     loop {
         FreeRtos::delay_ms(50);
+        // Get pot values
         let pot1_val = adc_driver.read(&mut pot1).unwrap();
         let pot2_val = adc_driver.read(&mut pot2).unwrap();
+
+        // map pot value to duty cycle
         let duty1 = utils::map(pot1_val.into(), POT_MIN, POT_MAX, 0, max_duty);
         let duty2 = utils::map(pot2_val.into(), POT_MIN, POT_MAX, 0, max_duty);
+
+        // set pwm (speed) for both motors
         pwm_pin1.set_duty(duty1.into())?;
-        let rpm1 = get_motor_rpm();
-        println!("duty = {}%, speed = {} rpm", (100 * duty1 / max_duty), rpm1);
+        pwm_pin2.set_duty(duty2.into())?;
+
+        // Get the RPM of each motor
+        let rpm1 = get_motor1_rpm();
+        let rpm2 = get_motor2_rpm();
+        println!("Motor 1: {:.2}, {:.2} rpm \t Motor 2: {:.2}, {:.2} rpm", pot1_val, rpm1, pot2_val, rpm2);
     }
 }
 
 // Calculates motor speed by doing an atomic read of
 // the elapsed time between encoder interrupts
-fn get_motor_rpm() -> f32 {
+fn get_motor1_rpm() -> f32 {
     let mut rpm: f32;
-    if ENC_INTERRUPT_FLAG.load(Ordering::SeqCst) {
-        let elapsed = ELAPSED_TIME_ATOMIC.load(Ordering::SeqCst);
+    if ENC_INTERRUPT_FLAG1.load(Ordering::SeqCst) {
+        let elapsed = ELAPSED_TIME_ATOMIC1.load(Ordering::SeqCst);
         if elapsed == 0 {
             rpm = 0.0
         } else {
             rpm = 1.0 / (elapsed as f32);
             rpm = rpm * 1000000.0 * 60.0 / GEAR_RATIO as f32 / ENCODER_MULT as f32;
         }
-        ENC_INTERRUPT_FLAG.store(false, Ordering::SeqCst);
+        ENC_INTERRUPT_FLAG1.store(false, Ordering::SeqCst);
+    } else {
+        rpm = 0.0;
+    }
+
+    rpm
+}
+
+fn get_motor2_rpm() -> f32 {
+    let mut rpm: f32;
+    if ENC_INTERRUPT_FLAG2.load(Ordering::SeqCst) {
+        let elapsed = ELAPSED_TIME_ATOMIC2.load(Ordering::SeqCst);
+        if elapsed == 0 {
+            rpm = 0.0
+        } else {
+            rpm = 1.0 / (elapsed as f32);
+            rpm = rpm * 1000000.0 * 60.0 / GEAR_RATIO as f32 / ENCODER_MULT as f32;
+        }
+        ENC_INTERRUPT_FLAG2.store(false, Ordering::SeqCst);
     } else {
         rpm = 0.0;
     }
