@@ -75,11 +75,13 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio23,
     )?;
 
-    // GPIO14 sets motor direction
-    let mut motor_dir = PinDriver::output(peripherals.pins.gpio32)?;
-    motor_dir.set_low()?;
+    // Sets motor direction
+    let mut motor1_dir = PinDriver::output(peripherals.pins.gpio32)?;
+    motor1_dir.set_low()?;
+    let mut motor2_dir = PinDriver::output(peripherals.pins.gpio21)?;
+    motor2_dir.set_low()?;
 
-    let max_duty = pwm_pin1.get_max_duty();
+    let max_duty = pwm_pin1.get_max_duty(); // max duty should be the same for both
 
     // Setup adc driver
     let mut adc_driver = AdcDriver::new(
@@ -130,11 +132,8 @@ fn main() -> anyhow::Result<()> {
         })?;
     }
 
-    // set motor speed
-    pwm_pin1.set_duty(max_duty)?;
-
     loop {
-        FreeRtos::delay_ms(50);
+
         // Get pot values
         let pot1_val = adc_driver.read(&mut pot1).unwrap();
         let pot2_val = adc_driver.read(&mut pot2).unwrap();
@@ -150,7 +149,10 @@ fn main() -> anyhow::Result<()> {
         // Get the RPM of each motor
         let rpm1 = get_motor1_rpm();
         let rpm2 = get_motor2_rpm();
+
+        // print adc values and speeds
         println!("Motor 1: {:.2}, {:.2} rpm \t Motor 2: {:.2}, {:.2} rpm", pot1_val, rpm1, pot2_val, rpm2);
+        FreeRtos::delay_ms(50);
     }
 }
 
