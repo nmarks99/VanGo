@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
+use esp_idf_sys;
 
 // GPIO
 use esp_idf_hal::gpio;
@@ -28,8 +29,8 @@ mod neopixel;
 use neopixel::Neopixel;
 mod utils;
 
-const GEAR_RATIO: u32 = 150; // TODO: check this
-const ENCODER_MULT: u32 = 14;
+const GEAR_RATIO: u32 = 50; // TODO: check this
+const ENCODER_MULT: u32 = 7;
 
 // these values were obtained experimentally
 const POT_MIN: u32 = 128;
@@ -46,7 +47,11 @@ static ENC_INTERRUPT_FLAG2: AtomicBool = AtomicBool::new(false);
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     let peripherals = Peripherals::take().unwrap();
-
+    unsafe {
+        esp_idf_sys::esp_task_wdt_delete(esp_idf_sys::xTaskGetIdleTaskHandleForCPU(
+            esp_idf_hal::cpu::core() as u32,
+        ));
+    }
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio12, peripherals.rmt.channel0)?;
     neo.set_color("cyan", 0.2)?;
@@ -54,6 +59,7 @@ fn main() -> anyhow::Result<()> {
     // system timer to get uptime
     let sys_timer1 = EspSystemTime {};
     let sys_timer2 = EspSystemTime {};
+    // let sys_timer3 = EspSystemTime {};
 
     // configure PWM on GPIO15 for motor 1
     let mut pwm_pin1 = LedcDriver::new(
@@ -105,7 +111,6 @@ fn main() -> anyhow::Result<()> {
     m2_enc_driver.set_pull(gpio::Pull::Up)?;
     m2_enc_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
 
-
     // ISR for motor 1 encoder
     unsafe {
         m1_enc_driver.subscribe(move || {
@@ -132,8 +137,41 @@ fn main() -> anyhow::Result<()> {
         })?;
     }
 
-    loop {
+    // const kp: f32 = 1.0;
+    // const ki: f32 = 0.1;
+    // const kd: f32 = 0.1;
+    // const target: f32 = 59.0;
+    // let mut last_err: f32 = 0.0;
+    // let mut i_err: f32 = 0.0;
+    // loop {
+    //     let pot1_val = adc_driver.read(&mut pot1).unwrap();
+    //     let rpm = get_motor1_rpm();
 
+    //     // begin PID loop when we turn up the pot
+    //     if pot1_val >= 1000 {
+    //         let err = target - rpm;
+    //         let d_err = err - last_err;
+    //         i_err = i_err + err;
+    //         println!("{:.2}", rpm); // print current speed
+
+    //         // compute control signal (duty cycle)
+    //         let mut u: u32 = (kp*err + kd*d_err + ki*i_err) as u32;
+    //         if u > max_duty {
+    //             u = max_duty;
+    //         }
+    //         pwm_pin1.set_duty(u as u32)?;
+
+    //         last_err = err;
+    //     }
+    //     else {
+    //         i_err = 0.0;
+    //         pwm_pin1.set_duty(0)?;
+    //     }
+
+    //     FreeRtos::delay_us(400);
+    // }
+
+    loop {
         // Get pot values
         let pot1_val = adc_driver.read(&mut pot1).unwrap();
         let pot2_val = adc_driver.read(&mut pot2).unwrap();
@@ -151,7 +189,10 @@ fn main() -> anyhow::Result<()> {
         let rpm2 = get_motor2_rpm();
 
         // print adc values and speeds
-        println!("Motor 1: {:.2}, {:.2} rpm \t Motor 2: {:.2}, {:.2} rpm", pot1_val, rpm1, pot2_val, rpm2);
+        println!(
+            "Motor 1: {:.2}, {:.2} rpm \t Motor 2: {:.2}, {:.2} rpm",
+            pot1_val, rpm1, pot2_val, rpm2
+        );
         FreeRtos::delay_ms(50);
     }
 }
