@@ -1,49 +1,75 @@
-// Code taken from https://github.com/esp-rs/esp-idf-hal/blob/master/examples/rmt_neopixel.rs
+// Code adapted from https://github.com/esp-rs/esp-idf-hal/blob/master/examples/rmt_neopixel.rs
 
 use anyhow;
+use core::ops::Mul;
 use core::time::Duration;
+use esp_idf_hal::gpio::OutputPin;
+use esp_idf_hal::peripheral::Peripheral;
+use esp_idf_hal::rmt;
 use esp_idf_hal::rmt::PinState;
+use esp_idf_hal::rmt::RmtChannel;
 use esp_idf_hal::rmt::TxRmtDriver;
 use esp_idf_hal::rmt::{FixedLengthSignal, Pulse};
+use esp_idf_sys::EspError;
 
-// sets the neopixel to the specified RGB
-pub fn set_rgb(rgb: Rgb, tx: &mut TxRmtDriver) -> anyhow::Result<()> {
-    let color: u32 = rgb.into();
-    let ticks_hz = tx.counter_clock()?;
-    let (t0h, t0l, t1h, t1l) = (
-        Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(350))?,
-        Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(800))?,
-        Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(700))?,
-        Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(600))?,
-    );
-    let mut signal = FixedLengthSignal::<24>::new();
-    for i in (0..24).rev() {
-        let p = 2_u32.pow(i);
-        let bit: bool = p & color != 0;
-        let (high_pulse, low_pulse) = if bit { (t1h, t1l) } else { (t0h, t0l) };
-        signal.set(23 - i as usize, &(high_pulse, low_pulse))?;
-    }
-    tx.start_blocking(&signal)?;
-    Ok(())
+pub struct Neopixel<'a> {
+    tx_driver: TxRmtDriver<'a>,
 }
 
-// set color from a string
-// if the provided color is not implemented, do nothing
-pub fn set_color(color: &str, tx: &mut TxRmtDriver) -> anyhow::Result<()> {
-    let rgb_op: Option<Rgb> = match color {
-        "red" => Some(Rgb::new(255, 0, 0)),
-        "green" => Some(Rgb::new(0, 255, 0)),
-        "blue" => Some(Rgb::new(0, 0, 255)),
-        "purple" => Some(Rgb::new(255, 0, 255)),
-        "yellow" => Some(Rgb::new(255, 255, 0)),
-        "cyan" => Some(Rgb::new(0, 255, 255)),
-        "white" => Some(Rgb::new(50, 50, 50)),
-        _ => None,
-    };
-    if rgb_op.is_some() {
-        set_rgb(rgb_op.unwrap(), tx)?;
+impl<'a> Neopixel<'a> {
+    pub fn new(
+        pin: impl Peripheral<P = impl OutputPin> + 'a,
+        rmt_channel: impl Peripheral<P = impl RmtChannel> + 'a
+    ) -> Result<Self, EspError> {
+        let rmt_config = rmt::config::TransmitConfig::new().clock_divider(1);
+        let rmt_tx = TxRmtDriver::new(rmt_channel, pin, &rmt_config)?;
+        Ok(Self { tx_driver: rmt_tx })
     }
-    Ok(())
+
+    // if the provided color is not implemented, do nothing
+    pub fn set_color(&mut self, color: &str, brightness: f32) -> anyhow::Result<()> {
+        let rgb_op: Option<Rgb> = match color {
+            "red" => Some(Rgb::new(255, 0, 0)),
+            "green" => Some(Rgb::new(0, 255, 0)),
+            "blue" => Some(Rgb::new(0, 0, 255)),
+            "purple" => Some(Rgb::new(255, 0, 255)),
+            "yellow" => Some(Rgb::new(255, 255, 0)),
+            "cyan" => Some(Rgb::new(0, 255, 255)),
+            "white" => Some(Rgb::new(50, 50, 50)),
+            _ => None,
+        };
+        if rgb_op.is_some() {
+            self.set_rgb(rgb_op.unwrap(), brightness)?;
+        }
+        else {
+            println!("Warning: Color {} not implemented for Neopixel", color);
+        }
+        Ok(())
+    }
+
+    // sets the neopixel to the specified RGB
+    pub fn set_rgb(&mut self, rgb: Rgb, brightness: f32) -> anyhow::Result<()> {
+        let rgb = rgb * brightness;
+        let color: u32 = rgb.into();
+        let ticks_hz = self.tx_driver.counter_clock()?;
+        let (t0h, t0l, t1h, t1l) = (
+            Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(350))?,
+            Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(800))?,
+            Pulse::new_with_duration(ticks_hz, PinState::High, &Duration::from_nanos(700))?,
+            Pulse::new_with_duration(ticks_hz, PinState::Low, &Duration::from_nanos(600))?,
+        );
+        let mut signal = FixedLengthSignal::<24>::new();
+        for i in (0..24).rev() {
+            let p = 2_u32.pow(i);
+            let bit: bool = p & color != 0;
+            let (high_pulse, low_pulse) = if bit { (t1h, t1l) } else { (t0h, t0l) };
+            signal.set(23 - i as usize, &(high_pulse, low_pulse))?;
+        }
+        self.tx_driver.start_blocking(&signal)?;
+        Ok(())
+    }
+
+
 }
 
 pub struct Rgb {
@@ -79,6 +105,21 @@ impl Rgb {
             g: ((g + m) * 255.0) as u8,
             b: ((b + m) * 255.0) as u8,
         })
+    }
+}
+
+impl Mul<f32> for Rgb {
+    // allows for multiplication of a Rgb by an f32,
+    // which simply multiplies each of the r, g, and b
+    // values by the f32 and converts back to u8
+    type Output = Rgb;
+
+    fn mul(self, rhs: f32) -> Rgb {
+        Rgb {
+            r: (self.r as f32 * rhs) as u8,
+            g: (self.g as f32 * rhs) as u8,
+            b: (self.b as f32 * rhs) as u8,
+        }
     }
 }
 

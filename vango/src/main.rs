@@ -22,16 +22,13 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 // TIME
 use esp_idf_svc::systime::EspSystemTime;
 
-// RMT
-use esp_idf_hal::rmt;
-use esp_idf_hal::rmt::TxRmtDriver;
-
 // user modules
 mod neopixel;
 use neopixel::Rgb;
+use neopixel::Neopixel;
 mod utils;
 
-const GEAR_RATIO: u32 = 150;
+const GEAR_RATIO: u32 = 150; // TODO: check this
 const ENCODER_MULT: u32 = 14;
 
 // these values were obtained experimentally
@@ -46,16 +43,9 @@ fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     let peripherals = Peripherals::take().unwrap();
 
-    // neopixel on GPIO12
-    let rmt_config = rmt::config::TransmitConfig::new().clock_divider(1);
-    let mut rmt_tx = TxRmtDriver::new(
-        peripherals.rmt.channel0,
-        peripherals.pins.gpio12,
-        &rmt_config,
-    )?;
-
-    // Set neopixel to blue, ~25% brightness
-    neopixel::set_rgb(Rgb::new(0, 0, 51), &mut rmt_tx)?;
+    // Set up neopixel
+    let mut neo = Neopixel::new(peripherals.pins.gpio12, peripherals.rmt.channel0)?;
+    neo.set_color("cyan", 0.2)?;
 
     // system timer to get uptime
     let sys_timer = EspSystemTime {};
