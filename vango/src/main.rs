@@ -28,6 +28,7 @@ mod neopixel;
 // use neopixel::Rgb;
 use neopixel::Neopixel;
 mod utils;
+mod motor;
 
 const GEAR_RATIO: u32 = 50; // TODO: check this
 const ENCODER_MULT: u32 = 7;

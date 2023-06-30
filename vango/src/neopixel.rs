@@ -19,7 +19,7 @@ pub struct Neopixel<'a> {
 impl<'a> Neopixel<'a> {
     pub fn new(
         pin: impl Peripheral<P = impl OutputPin> + 'a,
-        rmt_channel: impl Peripheral<P = impl RmtChannel> + 'a
+        rmt_channel: impl Peripheral<P = impl RmtChannel> + 'a,
     ) -> Result<Self, EspError> {
         let rmt_config = rmt::config::TransmitConfig::new().clock_divider(1);
         let rmt_tx = TxRmtDriver::new(rmt_channel, pin, &rmt_config)?;
@@ -40,8 +40,7 @@ impl<'a> Neopixel<'a> {
         };
         if rgb_op.is_some() {
             self.set_rgb(rgb_op.unwrap(), brightness)?;
-        }
-        else {
+        } else {
             println!("Warning: Color {} not implemented for Neopixel", color);
         }
         Ok(())
@@ -68,8 +67,6 @@ impl<'a> Neopixel<'a> {
         self.tx_driver.start_blocking(&signal)?;
         Ok(())
     }
-
-
 }
 
 pub struct Rgb {
