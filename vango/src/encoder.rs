@@ -1,3 +1,6 @@
+// Code taken from https://github.com/esp-rs/esp-idf-hal/blob/master/examples/pcnt_i64_encoder.rs
+
+#![allow(dead_code)]
 use std::cmp::min;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
@@ -9,8 +12,19 @@ use esp_idf_hal::pcnt::*;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::EspError;
 
+use core::f32::consts::PI as pi;
+
 const LOW_LIMIT: i16 = -100;
 const HIGH_LIMIT: i16 = 100;
+
+pub const ENCODER_RATE_MS: u64 = 10; // 100 Hz
+pub const GEAR_RATIO: u64 = 50;
+pub const COUNTS_PER_REV: u64 = 7; // counts per revolution
+pub const TICKS_TO_RPS: f32 = 1000.0 / (COUNTS_PER_REV * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
+pub const TICKS_TO_RPM: f32 =
+    60.0 * 1000.0 / (COUNTS_PER_REV * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
+pub const TICKS_TO_RAD_PER_SEC: f32 =
+    pi * 1000.0 / (COUNTS_PER_REV * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
 
 pub struct Encoder<'d> {
     unit: PcntDriver<'d>,
