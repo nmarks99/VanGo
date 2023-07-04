@@ -1,5 +1,6 @@
 // basics
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicI32, Ordering};
+use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
@@ -22,28 +23,34 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 
 // TIME
 use esp_idf_svc::systime::EspSystemTime;
+use esp_idf_hal::task::executor::{Monitor, Notify, Wait, FreeRtosMonitor};
 
 // user modules
 mod neopixel;
-// use neopixel::Rgb;
 use neopixel::Neopixel;
 mod utils;
 mod motor;
+mod encoder;
+use encoder::Encoder;
 
-const GEAR_RATIO: u32 = 50; // TODO: check this
-const ENCODER_MULT: u32 = 7;
 
 // these values were obtained experimentally
 const POT_MIN: u32 = 128;
 const POT_MAX: u32 = 3139;
 
-static LAST_TIME_ATOMIC1: AtomicU32 = AtomicU32::new(0);
-static ELAPSED_TIME_ATOMIC1: AtomicU32 = AtomicU32::new(0);
-static ENC_INTERRUPT_FLAG1: AtomicBool = AtomicBool::new(false);
+const ENCODER_RATE_MS: u64 = 10; // 100 Hz
+const GEAR_RATIO: u64 = 50; // TODO: check this
+const ENCODER_MULT: u64 = 7;
+const TICKS_TO_RPS: f32 = 1000.0 / (ENCODER_MULT * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
+const TICKS_TO_RPM: f32 = 60.0*1000.0 / (ENCODER_MULT * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
 
-static LAST_TIME_ATOMIC2: AtomicU32 = AtomicU32::new(0);
-static ELAPSED_TIME_ATOMIC2: AtomicU32 = AtomicU32::new(0);
-static ENC_INTERRUPT_FLAG2: AtomicBool = AtomicBool::new(false);
+static LAST_COUNT1: AtomicI32 = AtomicI32::new(0);
+static LAST_COUNT2: AtomicI32 = AtomicI32::new(0);
+static RPM1: AtomicU32 = AtomicU32::new(0);
+static RPM2: AtomicU32 = AtomicU32::new(0);
+// static LAST_TIME: AtomicU32 = AtomicU32::new(0);
+
+static SYS_TIMER: EspSystemTime = EspSystemTime {};
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -55,11 +62,11 @@ fn main() -> anyhow::Result<()> {
     }
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio12, peripherals.rmt.channel0)?;
-    neo.set_color("cyan", 0.2)?;
+    neo.set_color("red", 0.2)?;
 
     // system timer to get uptime
-    let sys_timer1 = EspSystemTime {};
-    let sys_timer2 = EspSystemTime {};
+    // let sys_timer1 = EspSystemTime {};
+    // let sys_timer2 = EspSystemTime {};
     // let sys_timer3 = EspSystemTime {};
 
     // configure PWM on GPIO15 for motor 1
@@ -102,77 +109,46 @@ fn main() -> anyhow::Result<()> {
     let mut pot2: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
         adc::AdcChannelDriver::new(peripherals.pins.gpio25)?;
 
-    // set up interrupt on enc A for first motor
-    let mut m1_enc_driver = PinDriver::input(peripherals.pins.gpio27)?;
-    m1_enc_driver.set_pull(gpio::Pull::Up)?;
-    m1_enc_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
+    // set up encoder for each motor
+    let encoder1 = Encoder::new(
+        peripherals.pcnt0,
+        peripherals.pins.gpio27,
+        peripherals.pins.gpio33
+    )?;
+    let encoder2 = Encoder::new(
+        peripherals.pcnt1,
+        peripherals.pins.gpio14,
+        peripherals.pins.gpio22
+    )?;
 
-    // set up interrupt on enc A for second motor
-    let mut m2_enc_driver = PinDriver::input(peripherals.pins.gpio14)?;
-    m2_enc_driver.set_pull(gpio::Pull::Up)?;
-    m2_enc_driver.set_interrupt_type(gpio::InterruptType::AnyEdge)?;
+    // Make a task for computing motor speed
+    let task_timer = esp_idf_svc::timer::EspTaskTimerService::new().unwrap();
+    let monitor = FreeRtosMonitor::new();
+    let monitor_notify = monitor.notifier();
 
-    // ISR for motor 1 encoder
-    unsafe {
-        m1_enc_driver.subscribe(move || {
-            ENC_INTERRUPT_FLAG1.store(true, Ordering::SeqCst);
-            let current_time = sys_timer1.now().as_micros() as u32;
-            let last_time = LAST_TIME_ATOMIC1.load(Ordering::SeqCst);
-            if last_time < current_time {
-                ELAPSED_TIME_ATOMIC1.store(current_time - last_time, Ordering::SeqCst);
-            }
-            LAST_TIME_ATOMIC1.store(current_time, Ordering::SeqCst);
-        })?;
-    }
+    // ISR (kinda?)
+    let task_timer = task_timer
+        .timer(move || {
+            monitor_notify.notify();
 
-    // ISR for motor 2 encoder
-    unsafe {
-        m2_enc_driver.subscribe(move || {
-            ENC_INTERRUPT_FLAG2.store(true, Ordering::SeqCst);
-            let current_time = sys_timer2.now().as_micros() as u32;
-            let last_time = LAST_TIME_ATOMIC2.load(Ordering::SeqCst);
-            if last_time < current_time {
-                ELAPSED_TIME_ATOMIC2.store(current_time - last_time, Ordering::SeqCst);
-            }
-            LAST_TIME_ATOMIC2.store(current_time, Ordering::SeqCst);
-        })?;
-    }
+            let count1 = encoder1.get_value().unwrap() as i32;
+            let last_count1 = LAST_COUNT1.load(Ordering::SeqCst) as i32;
+            let rpm1: f32 = (count1-last_count1).abs() as f32 * TICKS_TO_RPM;
+            RPM1.store(rpm1 as u32, Ordering::SeqCst);
+            LAST_COUNT1.store(count1,Ordering::SeqCst);
 
-    // const kp: f32 = 1.0;
-    // const ki: f32 = 0.1;
-    // const kd: f32 = 0.1;
-    // const target: f32 = 59.0;
-    // let mut last_err: f32 = 0.0;
-    // let mut i_err: f32 = 0.0;
-    // loop {
-    //     let pot1_val = adc_driver.read(&mut pot1).unwrap();
-    //     let rpm = get_motor1_rpm();
+            let count2 = encoder2.get_value().unwrap() as i32;
+            let last_count2 = LAST_COUNT2.load(Ordering::SeqCst) as i32;
+            let rpm2: f32 = (count2-last_count2).abs() as f32 * TICKS_TO_RPM;
+            RPM2.store(rpm2 as u32, Ordering::SeqCst);
+            LAST_COUNT2.store(count2,Ordering::SeqCst);
 
-    //     // begin PID loop when we turn up the pot
-    //     if pot1_val >= 1000 {
-    //         let err = target - rpm;
-    //         let d_err = err - last_err;
-    //         i_err = i_err + err;
-    //         println!("{:.2}", rpm); // print current speed
-
-    //         // compute control signal (duty cycle)
-    //         let mut u: u32 = (kp*err + kd*d_err + ki*i_err) as u32;
-    //         if u > max_duty {
-    //             u = max_duty;
-    //         }
-    //         pwm_pin1.set_duty(u as u32)?;
-
-    //         last_err = err;
-    //     }
-    //     else {
-    //         i_err = 0.0;
-    //         pwm_pin1.set_duty(0)?;
-    //     }
-
-    //     FreeRtos::delay_us(400);
-    // }
+        })
+        .unwrap();
+    task_timer.every(Duration::from_millis(ENCODER_RATE_MS)).unwrap();
 
     loop {
+
         // Get pot values
         let pot1_val = adc_driver.read(&mut pot1).unwrap();
         let pot2_val = adc_driver.read(&mut pot2).unwrap();
@@ -186,52 +162,12 @@ fn main() -> anyhow::Result<()> {
         pwm_pin2.set_duty(duty2.into())?;
 
         // Get the RPM of each motor
-        let rpm1 = get_motor1_rpm();
-        let rpm2 = get_motor2_rpm();
+        let rpm1 = RPM1.load(Ordering::SeqCst);
+        println!("RPM1 = {} rpm", rpm1);
+        let rpm2 = RPM2.load(Ordering::SeqCst);
+        println!("RPM2 = {} rpm", rpm2);
+        println!("-------------");
 
-        // print adc values and speeds
-        println!(
-            "Motor 1: {:.2}, {:.2} rpm \t Motor 2: {:.2}, {:.2} rpm",
-            pot1_val, rpm1, pot2_val, rpm2
-        );
         FreeRtos::delay_ms(50);
     }
-}
-
-// Calculates motor speed by doing an atomic read of
-// the elapsed time between encoder interrupts
-fn get_motor1_rpm() -> f32 {
-    let mut rpm: f32;
-    if ENC_INTERRUPT_FLAG1.load(Ordering::SeqCst) {
-        let elapsed = ELAPSED_TIME_ATOMIC1.load(Ordering::SeqCst);
-        if elapsed == 0 {
-            rpm = 0.0
-        } else {
-            rpm = 1.0 / (elapsed as f32);
-            rpm = rpm * 1000000.0 * 60.0 / GEAR_RATIO as f32 / ENCODER_MULT as f32;
-        }
-        ENC_INTERRUPT_FLAG1.store(false, Ordering::SeqCst);
-    } else {
-        rpm = 0.0;
-    }
-
-    rpm
-}
-
-fn get_motor2_rpm() -> f32 {
-    let mut rpm: f32;
-    if ENC_INTERRUPT_FLAG2.load(Ordering::SeqCst) {
-        let elapsed = ELAPSED_TIME_ATOMIC2.load(Ordering::SeqCst);
-        if elapsed == 0 {
-            rpm = 0.0
-        } else {
-            rpm = 1.0 / (elapsed as f32);
-            rpm = rpm * 1000000.0 * 60.0 / GEAR_RATIO as f32 / ENCODER_MULT as f32;
-        }
-        ENC_INTERRUPT_FLAG2.store(false, Ordering::SeqCst);
-    } else {
-        rpm = 0.0;
-    }
-
-    rpm
 }
