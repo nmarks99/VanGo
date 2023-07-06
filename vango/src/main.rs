@@ -26,12 +26,14 @@ use esp_idf_hal::task::executor::{FreeRtosMonitor, Monitor, Notify};
 use esp_idf_svc::systime::EspSystemTime;
 
 // user modules
-mod neopixel;
-use neopixel::Neopixel;
 mod encoder;
+mod neopixel;
+mod pen;
 mod utils;
 use encoder::Encoder;
+use pen::{Pen, PenState};
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
+use neopixel::Neopixel;
 
 const POT_MIN: u16 = 128;
 const POT_MAX: u16 = 3139;
@@ -57,6 +59,7 @@ fn main() -> anyhow::Result<()> {
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
     neo.set_color("red", 0.2)?;
 
+
     // configure PWM on GPIO15 for motor 1
     let mut left_pwm_driver = LedcDriver::new(
         peripherals.ledc.channel0,
@@ -75,6 +78,13 @@ fn main() -> anyhow::Result<()> {
             &TimerConfig::new().frequency(80.Hz().into()),
         )?,
         peripherals.pins.gpio17,
+    )?;
+
+    // Set up Pen
+    let mut pen = Pen::new(
+        peripherals.pins.gpio15,
+        peripherals.ledc.channel2,
+        peripherals.ledc.timer2
     )?;
 
     // Sets motor direction
@@ -140,7 +150,18 @@ fn main() -> anyhow::Result<()> {
     use control::PidController;
     let mut left_pid = PidController::new(1.0, 0.1, 0.0);
     let mut right_pid = PidController::new(1.0, 0.1, 0.0);
+
+    // let mut state: PenState;
     loop {
+        // pen.up()?;
+        // FreeRtos::delay_ms(2000);
+        // state = pen.get_state()?;
+        // println!("State = {:?}", state);
+        // pen.down()?;
+        // FreeRtos::delay_ms(2000);
+        // state = pen.get_state()?;
+        // println!("State = {:?}", state);
+
         // Get pot values
         let pot_left_val = adc_driver.read(&mut pot_left).unwrap();
         let pot_right_val = adc_driver.read(&mut pot_right).unwrap();
@@ -165,18 +186,18 @@ fn main() -> anyhow::Result<()> {
         left_pwm_driver.set_duty(u1 as u32)?;
         right_pwm_driver.set_duty(u2 as u32)?;
 
-        // println!("-------------");
-        // println!("Motor 1:");
-        // println!(
-        //     "measured = {}\ntarget = {}\nu = {:.3}",
-        //     left_speed, target_left, u1
-        // );
-        // println!("-------------");
-        // println!("Motor 2:");
-        // println!(
-        //     "measured = {}\ntarget = {}\nu = {:.3}",
-        //     right_speed, target_right, u2
-        // );
+        println!("-------------");
+        println!("Motor 1:");
+        println!(
+            "measured = {}\ntarget = {}\nu = {:.3}",
+            left_speed, target_left, u1
+        );
+        println!("-------------");
+        println!("Motor 2:");
+        println!(
+            "measured = {}\ntarget = {}\nu = {:.3}",
+            right_speed, target_right, u2
+        );
 
         FreeRtos::delay_ms(15);
     }
