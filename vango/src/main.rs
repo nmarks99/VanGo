@@ -36,11 +36,12 @@ use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 const POT_MIN: u32 = 128;
 const POT_MAX: u32 = 3139;
 
-static LAST_COUNT1: AtomicI32 = AtomicI32::new(0);
-static LAST_COUNT2: AtomicI32 = AtomicI32::new(0);
-static SPEED1: AtomicU32 = AtomicU32::new(0);
-static SPEED2: AtomicU32 = AtomicU32::new(0);
+static LAST_COUNT_LEFT: AtomicI32 = AtomicI32::new(0);
+static LAST_COUNT_RIGHT: AtomicI32 = AtomicI32::new(0);
+static LEFT_SPEED: AtomicU32 = AtomicU32::new(0);
+static RIGHT_SPEED: AtomicU32 = AtomicU32::new(0);
 
+#[allow(dead_code)]
 static SYS_TIMER: EspSystemTime = EspSystemTime {};
 
 fn main() -> anyhow::Result<()> {
@@ -57,17 +58,17 @@ fn main() -> anyhow::Result<()> {
     neo.set_color("red", 0.2)?;
 
     // configure PWM on GPIO15 for motor 1
-    let mut pwm_pin1 = LedcDriver::new(
+    let mut left_pwm_driver = LedcDriver::new(
         peripherals.ledc.channel0,
         LedcTimerDriver::new(
             peripherals.ledc.timer0,
             &TimerConfig::new().frequency(80.Hz().into()),
         )?,
-        peripherals.pins.gpio15,
+        peripherals.pins.gpio13,
     )?;
 
     // configure PWM on GPIO23 for motor 1
-    let mut pwm_pin2 = LedcDriver::new(
+    let mut right_pwm_driver = LedcDriver::new(
         peripherals.ledc.channel1,
         LedcTimerDriver::new(
             peripherals.ledc.timer1,
@@ -77,12 +78,12 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Sets motor direction
-    let mut motor1_dir = PinDriver::output(peripherals.pins.gpio32)?;
-    motor1_dir.set_low()?;
-    let mut motor2_dir = PinDriver::output(peripherals.pins.gpio21)?;
-    motor2_dir.set_low()?;
+    let mut left_direction = PinDriver::output(peripherals.pins.gpio32)?;
+    left_direction.set_low()?;
+    let mut right_direction = PinDriver::output(peripherals.pins.gpio21)?;
+    right_direction.set_low()?;
 
-    let max_duty = pwm_pin1.get_max_duty(); // max duty should be the same for both
+    let max_duty = left_pwm_driver.get_max_duty(); // max duty should be the same for both
 
     // Setup adc driver
     let mut adc_driver = AdcDriver::new(
@@ -90,19 +91,19 @@ fn main() -> anyhow::Result<()> {
         &adc::config::Config::new().calibration(true),
     )?;
 
-    // setup analog input for pot1 and pot2
-    let mut pot1: AdcChannelDriver<'_, gpio::Gpio26, Atten11dB<_>> =
+    // setup analog input for pot_left and pot_right
+    let mut pot_left: AdcChannelDriver<'_, gpio::Gpio26, Atten11dB<_>> =
         adc::AdcChannelDriver::new(peripherals.pins.gpio26)?;
-    let mut pot2: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
+    let mut pot_right: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
         adc::AdcChannelDriver::new(peripherals.pins.gpio25)?;
 
     // set up encoder for each motor
-    let encoder1 = Encoder::new(
+    let left_encoder = Encoder::new(
         peripherals.pcnt0,
         peripherals.pins.gpio27,
         peripherals.pins.gpio33,
     )?;
-    let encoder2 = Encoder::new(
+    let right_encoder = Encoder::new(
         peripherals.pcnt1,
         peripherals.pins.gpio14,
         peripherals.pins.gpio22,
@@ -118,17 +119,17 @@ fn main() -> anyhow::Result<()> {
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
 
-            let count1 = encoder1.get_value().unwrap() as i32;
-            let last_count1 = LAST_COUNT1.load(Ordering::SeqCst) as i32;
-            let speed1: f32 = (count1 - last_count1).abs() as f32 * TICKS_TO_RPM;
-            SPEED1.store(speed1 as u32, Ordering::SeqCst);
-            LAST_COUNT1.store(count1, Ordering::SeqCst);
+            let count1 = left_encoder.get_value().unwrap() as i32;
+            let last_count1 = LAST_COUNT_LEFT.load(Ordering::SeqCst) as i32;
+            let left_speed: f32 = (count1 - last_count1).abs() as f32 * TICKS_TO_RPM;
+            LEFT_SPEED.store(left_speed as u32, Ordering::SeqCst);
+            LAST_COUNT_LEFT.store(count1, Ordering::SeqCst);
 
-            let count2 = encoder2.get_value().unwrap() as i32;
-            let last_count2 = LAST_COUNT2.load(Ordering::SeqCst) as i32;
-            let speed2: f32 = (count2 - last_count2).abs() as f32 * TICKS_TO_RPM;
-            SPEED2.store(speed2 as u32, Ordering::SeqCst);
-            LAST_COUNT2.store(count2, Ordering::SeqCst);
+            let count2 = right_encoder.get_value().unwrap() as i32;
+            let last_count2 = LAST_COUNT_RIGHT.load(Ordering::SeqCst) as i32;
+            let right_speed: f32 = (count2 - last_count2).abs() as f32 * TICKS_TO_RPM;
+            RIGHT_SPEED.store(right_speed as u32, Ordering::SeqCst);
+            LAST_COUNT_RIGHT.store(count2, Ordering::SeqCst);
         })
         .unwrap();
 
@@ -138,31 +139,43 @@ fn main() -> anyhow::Result<()> {
 
     use control::PidController;
     let mut motor1_pid = PidController::new(2.0, 0.02, 0.001);
+    let mut motor2_pid = PidController::new(2.0, 0.02, 0.001);
+
     loop {
         // Get pot values
-        let pot1_val = adc_driver.read(&mut pot1).unwrap();
-        // let pot2_val = adc_driver.read(&mut pot2).unwrap();
+        let pot_left_val = adc_driver.read(&mut pot_left).unwrap();
+        let pot_right_val = adc_driver.read(&mut pot_right).unwrap();
 
         // map pot value to duty cycle
-        let duty1 = utils::map(pot1_val.into(), POT_MIN, POT_MAX, 0, max_duty);
-        // let duty2 = utils::map(pot2_val.into(), POT_MIN, POT_MAX, 0, max_duty);
+        let duty_left = utils::map(pot_left_val.into(), POT_MIN, POT_MAX, 0, 257);
+        let duty_right = utils::map(pot_right_val.into(), POT_MIN, POT_MAX, 0, 270);
 
         // Get the RPM of each motor
-        let speed1 = SPEED1.load(Ordering::SeqCst);
-        // println!("RPM1 = {} rpm", speed1);
-        // let speed2 = SPEED2.load(Ordering::SeqCst);
-        // println!("RPM2 = {} rpm", speed2);
+        let left_speed = LEFT_SPEED.load(Ordering::SeqCst);
+        let right_speed = RIGHT_SPEED.load(Ordering::SeqCst);
 
-        let u = motor1_pid.compute(duty1 as f32, speed1 as f32);
-        pwm_pin1.set_duty(u as u32)?;
+        // Compute control signal to send from PID controller
+        let u1 = motor1_pid.compute(duty_left as f32, left_speed as f32);
+        let u2 = motor2_pid.compute(duty_right as f32, right_speed as f32);
 
-        println!("now = {}\ntarget = {}\nu = {:.3}", speed1, duty1, u);
+        // Set duty cycle for each motor
+        left_pwm_driver.set_duty(u1 as u32)?;
+        right_pwm_driver.set_duty(u2 as u32)?;
+
         println!("-------------");
-        // set pwm (speed) for both motors
-        // pwm_pin1.set_duty(duty1.into())?;
-        // pwm_pin2.set_duty(duty2.into())?;
+        println!("Motor 1:");
+        println!(
+            "now = {}\ntarget = {}\nu = {:.3}",
+            left_speed, duty_left, u1
+        );
+        println!("-------------");
+        println!("Motor 2:");
+        println!(
+            "now = {}\ntarget = {}\nu = {:.3}",
+            right_speed, duty_right, u2
+        );
 
-        FreeRtos::delay_ms(50);
+        FreeRtos::delay_ms(15);
     }
 }
 
