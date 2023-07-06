@@ -33,8 +33,8 @@ mod utils;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 
-const POT_MIN: u32 = 128;
-const POT_MAX: u32 = 3139;
+const POT_MIN: u16 = 128;
+const POT_MAX: u16 = 3139;
 
 static LAST_COUNT_LEFT: AtomicI32 = AtomicI32::new(0);
 static LAST_COUNT_RIGHT: AtomicI32 = AtomicI32::new(0);
@@ -54,7 +54,7 @@ fn main() -> anyhow::Result<()> {
         ));
     }
     // Set up neopixel
-    let mut neo = Neopixel::new(peripherals.pins.gpio12, peripherals.rmt.channel0)?;
+    let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
     neo.set_color("red", 0.2)?;
 
     // configure PWM on GPIO15 for motor 1
@@ -74,16 +74,16 @@ fn main() -> anyhow::Result<()> {
             peripherals.ledc.timer1,
             &TimerConfig::new().frequency(80.Hz().into()),
         )?,
-        peripherals.pins.gpio23,
+        peripherals.pins.gpio17,
     )?;
 
     // Sets motor direction
-    let mut left_direction = PinDriver::output(peripherals.pins.gpio32)?;
+    let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     left_direction.set_low()?;
-    let mut right_direction = PinDriver::output(peripherals.pins.gpio21)?;
+    let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
     right_direction.set_low()?;
 
-    let max_duty = left_pwm_driver.get_max_duty(); // max duty should be the same for both
+    // let max_duty = left_pwm_driver.get_max_duty(); // max duty should be the same for both
 
     // Setup adc driver
     let mut adc_driver = AdcDriver::new(
@@ -106,7 +106,7 @@ fn main() -> anyhow::Result<()> {
     let right_encoder = Encoder::new(
         peripherals.pcnt1,
         peripherals.pins.gpio14,
-        peripherals.pins.gpio22,
+        peripherals.pins.gpio16,
     )?;
 
     // Make a task for computing motor speed
@@ -138,42 +138,45 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     use control::PidController;
-    let mut motor1_pid = PidController::new(2.0, 0.02, 0.001);
-    let mut motor2_pid = PidController::new(2.0, 0.02, 0.001);
-
+    let mut left_pid = PidController::new(1.0, 0.1, 0.0);
+    let mut right_pid = PidController::new(1.0, 0.1, 0.0);
     loop {
         // Get pot values
         let pot_left_val = adc_driver.read(&mut pot_left).unwrap();
         let pot_right_val = adc_driver.read(&mut pot_right).unwrap();
+        println!("pot left = {pot_left_val}");
+        println!("pot right = {pot_right_val}");
 
         // map pot value to duty cycle
-        let duty_left = utils::map(pot_left_val.into(), POT_MIN, POT_MAX, 0, 257);
-        let duty_right = utils::map(pot_right_val.into(), POT_MIN, POT_MAX, 0, 270);
+        let target_left = utils::map(pot_left_val, POT_MIN, POT_MAX, 0u16, 257u16);
+        let target_right = utils::map(pot_right_val, POT_MIN, POT_MAX, 0u16, 270u16);
+        println!("target left = {target_left}");
+        println!("target right = {target_right}");
 
         // Get the RPM of each motor
         let left_speed = LEFT_SPEED.load(Ordering::SeqCst);
         let right_speed = RIGHT_SPEED.load(Ordering::SeqCst);
 
         // Compute control signal to send from PID controller
-        let u1 = motor1_pid.compute(duty_left as f32, left_speed as f32);
-        let u2 = motor2_pid.compute(duty_right as f32, right_speed as f32);
+        let u1 = left_pid.compute(target_left as f32, left_speed as f32);
+        let u2 = right_pid.compute(target_right as f32, right_speed as f32);
 
         // Set duty cycle for each motor
         left_pwm_driver.set_duty(u1 as u32)?;
         right_pwm_driver.set_duty(u2 as u32)?;
 
-        println!("-------------");
-        println!("Motor 1:");
-        println!(
-            "now = {}\ntarget = {}\nu = {:.3}",
-            left_speed, duty_left, u1
-        );
-        println!("-------------");
-        println!("Motor 2:");
-        println!(
-            "now = {}\ntarget = {}\nu = {:.3}",
-            right_speed, duty_right, u2
-        );
+        // println!("-------------");
+        // println!("Motor 1:");
+        // println!(
+        //     "measured = {}\ntarget = {}\nu = {:.3}",
+        //     left_speed, target_left, u1
+        // );
+        // println!("-------------");
+        // println!("Motor 2:");
+        // println!(
+        //     "measured = {}\ntarget = {}\nu = {:.3}",
+        //     right_speed, target_right, u2
+        // );
 
         FreeRtos::delay_ms(15);
     }
