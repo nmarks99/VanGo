@@ -31,9 +31,9 @@ mod neopixel;
 mod pen;
 mod utils;
 use encoder::Encoder;
-use pen::{Pen, PenState};
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
+use pen::{Pen, PenState};
 
 const POT_MIN: u16 = 128;
 const POT_MAX: u16 = 3139;
@@ -50,15 +50,16 @@ fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     let peripherals = Peripherals::take().unwrap();
 
+    // disable watchdog, not sure if this works though
     unsafe {
         esp_idf_sys::esp_task_wdt_delete(esp_idf_sys::xTaskGetIdleTaskHandleForCPU(
             esp_idf_hal::cpu::core() as u32,
         ));
     }
+
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
     neo.set_color("red", 0.2)?;
-
 
     // configure PWM on GPIO15 for motor 1
     let mut left_pwm_driver = LedcDriver::new(
@@ -84,7 +85,7 @@ fn main() -> anyhow::Result<()> {
     let mut pen = Pen::new(
         peripherals.pins.gpio15,
         peripherals.ledc.channel2,
-        peripherals.ledc.timer2
+        peripherals.ledc.timer2,
     )?;
 
     // Sets motor direction

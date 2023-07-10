@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "vango_fplib")(type "KiCad")(uri "${KIPRJMOD}/vango_fplib.pretty")(options "")(descr ""))
+)

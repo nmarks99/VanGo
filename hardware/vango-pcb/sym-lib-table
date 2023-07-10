@@ -1,0 +1,7 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "vango_lib")(type "KiCad")(uri "${KIPRJMOD}/vango_lib.kicad_sym")(options "")(descr ""))
+  (lib (name "XT60PW-M")(type "KiCad")(uri "${KIPRJMOD}/XT60/XT60PW-M.kicad_sym")(options "")(descr ""))
+  (lib (name "EG1218")(type "KiCad")(uri "${KIPRJMOD}/EG1218_switch/EG1218.kicad_sym")(options "")(descr ""))
+  (lib (name "SPDT_slide")(type "KiCad")(uri "${KIPRJMOD}/500SSP1S1M2REA/500SSP1S1M2REA.kicad_sym")(options "")(descr ""))
+)
