@@ -88,9 +88,11 @@ fn main() -> anyhow::Result<()> {
         goal_pose_vec.push(pose);
     }
 
-    // for each pose in goal_pose_vec
-    // - compute the optimal controls (left and right wheel speeds)
-    // - get the pose of the robot at the next step
+    // for each pose in goal_pose_vec:
+    // - get the wheel angles from encoders with BLE
+    // - get current pose estimate from odometry given wheel angles (FK)
+    // - compute the optimal controls (wheel speeds)
+    // - send control signals to motors with BLE
 
     Ok(())
 }
