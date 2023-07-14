@@ -55,13 +55,13 @@ fn read_csv_trajectory(csv_path: &str) -> anyhow::Result<Vec<Vector2D<f64>>> {
 /// computes the new pose of the robot by integrating forward
 /// the dynamics. This will be replaced in real life with
 /// the pose estimate from robot odometry
-fn simulate(pose: Pose2D<f64>, u1: f64, u2: f64, dt: f64) -> Pose2D<f64> {
-    let x_new = pose.x + f64::cos(pose.theta) * u1 * dt;
-    let y_new = pose.y + f64::sin(pose.theta) * u1 * dt;
-    let theta_new = pose.theta + u2 * dt;
-
-    Pose2D::new(x_new, y_new, theta_new)
-}
+// fn simulate(pose: Pose2D<f64>, u1: f64, u2: f64, dt: f64) -> Pose2D<f64> {
+//     let x_new = pose.x + f64::cos(pose.theta) * u1 * dt;
+//     let y_new = pose.y + f64::sin(pose.theta) * u1 * dt;
+//     let theta_new = pose.theta + u2 * dt;
+//
+//     Pose2D::new(x_new, y_new, theta_new)
+// }
 
 // const WHEEL_RADIUS: f32 = 0.033; // meters
 const MAX_SPEED: f64 = 25.0;
@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
 
     // for each pose in goal_pose_vec
     // - compute the optimal controls (left and right wheel speeds)
-    // - get the pose of the robot at the next step (simulated)
+    // - get the pose of the robot at the next step
 
     Ok(())
 }
