@@ -52,19 +52,10 @@ fn read_csv_trajectory(csv_path: &str) -> anyhow::Result<Vec<Vector2D<f64>>> {
     Ok(points)
 }
 
-/// computes the new pose of the robot by integrating forward
-/// the dynamics. This will be replaced in real life with
-/// the pose estimate from robot odometry
-// fn simulate(pose: Pose2D<f64>, u1: f64, u2: f64, dt: f64) -> Pose2D<f64> {
-//     let x_new = pose.x + f64::cos(pose.theta) * u1 * dt;
-//     let y_new = pose.y + f64::sin(pose.theta) * u1 * dt;
-//     let theta_new = pose.theta + u2 * dt;
-//
-//     Pose2D::new(x_new, y_new, theta_new)
-// }
-
-// const WHEEL_RADIUS: f32 = 0.033; // meters
+const WHEEL_RADIUS: f64 = 0.042;
+const WHEEL_SEPARATION: f64 = 0.100;
 const MAX_SPEED: f64 = 25.0;
+
 fn main() -> anyhow::Result<()> {
     // assume the robot start at 0,0,pi/2
     let start: Pose2D<f64> = Pose2D::new(0.0, 0.0, PI / 2.0);
