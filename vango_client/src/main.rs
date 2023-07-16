@@ -126,27 +126,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::time::sleep(Duration::from_secs(1)).await;
     neopixel_chr.write(&[0x31]).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
+    neopixel_chr.write(&[0x32]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
     neopixel_chr.write(&[0x33]).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
     neopixel_chr.write(&[0x34]).await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    neopixel_chr.write(&[0x35]).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().into_raw_mode().unwrap();
 
     // clear the screen, move and hide cursor
-    // write!(
-    //     stdout,
-    //     "{} {} {}",
-    //     termion::clear::All,
-    //     termion::cursor::Goto(1, 1),
-    //     termion::cursor::Hide
-    // )
-    // .unwrap();
-    //
-    // stdout.flush().unwrap();
+    write!(
+        stdout,
+        "{} {} {}",
+        termion::clear::All,
+        termion::cursor::Goto(1, 1),
+        termion::cursor::Hide
+    )
+    .unwrap();
+    stdout.flush().unwrap();
 
     // ==============================
 
@@ -172,9 +171,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
         goal_pose_vec.push(pose);
     }
 
-    for p in &goal_pose_vec {
-        info!("{} {} {}", p.x, p.y, p.theta)
+    // blocking, exit with q
+    for c in stdin.keys() {
+        write!(
+            stdout,
+            "{} {}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1)
+        )
+        .unwrap();
+
+        let cmd: Option<&str> = match c.unwrap() {
+            Key::Up => {
+                println!("ON");
+                Some("UP")
+            }
+
+            Key::Down => {
+                println!("OFF");
+                Some("DOWN")
+            }
+
+            Key::Char('q') => break,
+
+            _ => None,
+        };
+
+        if cmd.is_some() {
+            if cmd.unwrap() == "UP" {
+                if let Err(err) = neopixel_chr.write(&[0x35]).await {
+                    eprintln!("Write to Neopixel characteristic failed, {}", err);
+                }
+            } else if cmd.unwrap() == "DOWN" {
+                if let Err(err) = neopixel_chr.write(&[0x32]).await {
+                    eprintln!("Write to Neopixel characteristic failed, {}", err);
+                }
+            }
+        }
+
+        stdout.flush().unwrap();
     }
+
+    // clear screen, move and show cursor at the end
+    write!(
+        stdout,
+        "{} {} {}",
+        termion::clear::All,
+        termion::cursor::Goto(1, 1),
+        termion::cursor::Show
+    )
+    .unwrap();
 
     // for each pose in goal_pose_vec:
     // - get the wheel angles from encoders with BLE
