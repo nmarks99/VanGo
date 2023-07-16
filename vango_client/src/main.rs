@@ -9,6 +9,20 @@ use diff_drive::utils;
 use std::error::Error;
 use std::f64::consts::PI;
 
+use bluest::{Adapter, Characteristic, Uuid};
+use futures_util::StreamExt;
+use std::time::Duration;
+use tracing::info;
+use tracing::metadata::LevelFilter;
+
+use std::io::Write;
+use termion::event::Key;
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
+
+const NEOPIXEL_CHARACTERISTIC: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
+const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
+
 fn linspace(start: f32, stop: f32, num_points: usize) -> Vec<f32> {
     let step = (stop - start) / (num_points - 1) as f32;
     (0..num_points).map(|i| start + (i as f32) * step).collect()
@@ -56,7 +70,86 @@ const WHEEL_RADIUS: f64 = 0.042;
 const WHEEL_SEPARATION: f64 = 0.100;
 const MAX_SPEED: f64 = 25.0;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
+    let adapter = Adapter::default()
+        .await
+        .ok_or("Bluetooth adapter not found")?;
+    adapter.wait_available().await?;
+
+    let device = adapter
+        .discover_devices(&[VANGO_SERVICE_ID])
+        .await?
+        .next()
+        .await
+        .ok_or("Failed to discover device")??;
+    info!(
+        "Found device: {} ({:?})",
+        device.name().as_deref().unwrap_or("(unknown)"),
+        device.id()
+    );
+
+    adapter.connect_device(&device).await?;
+    info!("Connected!");
+
+    let service = match device
+        .discover_services_with_uuid(VANGO_SERVICE_ID)
+        .await?
+        .get(0)
+    {
+        Some(service) => service.clone(),
+        None => return Err("Service not found".into()),
+    };
+    info!("Vango service connected");
+
+    let characteristics = service.discover_characteristics().await?;
+    info!("Discovered characteristics");
+
+    // let mut neopixel_chr: Option<&Characteristic> = None;
+    let neopixel_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == NEOPIXEL_CHARACTERISTIC)
+        .ok_or("Neopixel characteristic not found")?;
+    neopixel_chr.write(&[0x30]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    neopixel_chr.write(&[0x31]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    neopixel_chr.write(&[0x33]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    neopixel_chr.write(&[0x34]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    neopixel_chr.write(&[0x35]).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+
+    // clear the screen, move and hide cursor
+    // write!(
+    //     stdout,
+    //     "{} {} {}",
+    //     termion::clear::All,
+    //     termion::cursor::Goto(1, 1),
+    //     termion::cursor::Hide
+    // )
+    // .unwrap();
+    //
+    // stdout.flush().unwrap();
+
+    // ==============================
+
     // assume the robot start at 0,0,pi/2
     let start: Pose2D<f64> = Pose2D::new(0.0, 0.0, PI / 2.0);
 
@@ -77,6 +170,10 @@ fn main() -> anyhow::Result<()> {
     for i in 0..points.len() {
         let pose = Pose2D::new(points[i].x, points[i].y, theta_vec[i]);
         goal_pose_vec.push(pose);
+    }
+
+    for p in &goal_pose_vec {
+        info!("{} {} {}", p.x, p.y, p.theta)
     }
 
     // for each pose in goal_pose_vec:
