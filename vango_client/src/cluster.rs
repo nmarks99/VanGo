@@ -74,8 +74,8 @@ impl Cluster {
     }
 
     /// Returns the vector of points in the cluster
-    pub fn to_vec(self) -> Vec<Vector2D<f64>> {
-        self.points
+    pub fn to_vec(&self) -> Vec<Vector2D<f64>> {
+        self.points.clone()
     }
 }
 
@@ -143,5 +143,62 @@ mod tests {
         let v = cluster.to_vec();
         assert!(almost_equal(v[0].x, 1.0, 1e-6));
         assert!(almost_equal(v[0].y, 2.0, 1e-6));
+    }
+
+    #[test]
+    fn cluster_from_csv() {
+        fn read_csv_trajectory(csv_path: &str) -> anyhow::Result<Vec<Vector2D<f64>>> {
+            let mut reader = csv::Reader::from_path(csv_path)?;
+
+            let mut points: Vec<Vector2D<f64>> = vec![];
+
+            // note this skips the first line of the csv file
+            for res in reader.records() {
+                let record = res?;
+                let x: f64 = record[0].parse().unwrap();
+                let y: f64 = record[1].parse().unwrap();
+                let v = Vector2D::new(x, y);
+                points.push(v);
+            }
+
+            Ok(points)
+        }
+
+        // Get points along target trajectory
+        // Path is hardcoded, will fail if file is not there
+        let points: Vec<Vector2D<f64>> =
+            read_csv_trajectory("/home/nick/GitHub/VanGo/proto/gear_xy.csv")
+                .expect("File not found - note path is hardcoded in the test");
+
+        // Create a vector of clusters with the points from the CSV
+        const THRESHOLD: f64 = 10.0;
+        let mut all_clusters = vec![Cluster::new(THRESHOLD)];
+        for p in &points {
+            let mut added = false;
+            for cluster in &mut all_clusters {
+                added = cluster.add(*p);
+                if added {
+                    break;
+                }
+            }
+            if !added {
+                all_clusters.push(Cluster::new_with_point(THRESHOLD, *p));
+            }
+        }
+        println!("\n{} total clusters", all_clusters.len());
+
+        // write all the clustered points to a csv file
+        let mut csv_file = csv::Writer::from_path("/home/nick/GitHub/VanGo/proto/cluster_out.csv")
+            .expect("couldn't create csv file");
+
+        let mut cluster_count = 0.0; // this tells which cluster the point is a part of
+        for cluster in &all_clusters {
+            let cluster_vec = cluster.clone().to_vec();
+            for point in &cluster.to_vec() {
+                let line = [point.x, point.y, cluster_count].map(|e| e.to_string());
+                csv_file.write_record(line).expect("failed to write line");
+            }
+            cluster_count += 1.0;
+        }
     }
 }
