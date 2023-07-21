@@ -79,12 +79,37 @@ impl Cluster {
     }
 }
 
+/// Given a vector of points, group all the points
+/// into clusters with the given distance threshold
+pub fn clusterize(points: &Vec<Vector2D<f64>>, threshold: f64) -> Vec<Cluster> {
+    let mut all_clusters = vec![Cluster::new(threshold)];
+    for p in points {
+        let mut added = false;
+        for cluster in &mut all_clusters {
+            added = cluster.add(*p);
+            if added {
+                break;
+            }
+        }
+        if !added {
+            all_clusters.push(Cluster::new_with_point(threshold, *p));
+        }
+    }
+    all_clusters
+}
+
+/// Gets the distance threshold to use for a cluster
+/// this is pretty dumb. By doing this, we basically are
+/// assuming the first two points are on the same curve,
+/// AKA in the same cluster. This seems to mostly work...
+pub fn get_threshold(points: &Vec<Vector2D<f64>>) -> f64 {
+    let d = distance(points[0], points[1]);
+    d + d * 0.05
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use crate::cluster::Cluster;
-    // use diff_drive::rigid2d::Vector2D;
-    // use diff_drive::utils::almost_equal;
 
     #[test]
     fn new() {
@@ -167,24 +192,14 @@ mod tests {
         // Get points along target trajectory
         // Path is hardcoded, will fail if file is not there
         let points: Vec<Vector2D<f64>> =
-            read_csv_trajectory("/home/nick/GitHub/VanGo/proto/gear_xy.csv")
+            read_csv_trajectory("/home/nick/GitHub/VanGo/proto/rocket.csv")
                 .expect("File not found - note path is hardcoded in the test");
 
-        // Create a vector of clusters with the points from the CSV
-        const THRESHOLD: f64 = 10.0;
-        let mut all_clusters = vec![Cluster::new(THRESHOLD)];
-        for p in &points {
-            let mut added = false;
-            for cluster in &mut all_clusters {
-                added = cluster.add(*p);
-                if added {
-                    break;
-                }
-            }
-            if !added {
-                all_clusters.push(Cluster::new_with_point(THRESHOLD, *p));
-            }
-        }
+        // Cluster the points by the threshold distance
+        // const THRESHOLD: f64 = 10.0;
+        let threshold: f64 = get_threshold(&points);
+        println!("threshold = {}", threshold);
+        let all_clusters = clusterize(&points, threshold);
         println!("\n{} total clusters", all_clusters.len());
 
         // write all the clustered points to a csv file
