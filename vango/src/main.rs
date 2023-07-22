@@ -71,7 +71,7 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio13,
     )?;
 
-    // configure PWM on GPIO23 for motor 1
+    // configure PWM on GPIO23 for motor 2
     let mut right_pwm_driver = LedcDriver::new(
         peripherals.ledc.channel1,
         LedcTimerDriver::new(
