@@ -1206,7 +1206,7 @@
   (gr_text "5V" (at 38.490737 60.908731 90) (layer "F.SilkS") (tstamp 469dd294-7bc0-4408-b055-f73866966351)
     (effects (font (size 1 1) (thickness 0.15)))
   )
-  (gr_text "VanGo V1\n" (at 69.432588 53.620954) (layer "F.SilkS") (tstamp 5dd05f2d-2d0c-48e3-9282-a3f0c044b9fa)
+  (gr_text "VanGo V2\n" (at 69.432588 53.620954) (layer "F.SilkS") (tstamp 5dd05f2d-2d0c-48e3-9282-a3f0c044b9fa)
     (effects (font (size 1 1) (thickness 0.15)) (justify left bottom))
   )
   (gr_text "2" (at 43.18 96.52 90) (layer "F.SilkS") (tstamp 7534dad9-e5eb-4d61-a139-d301a4a9dc5a)
