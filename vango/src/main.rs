@@ -4,7 +4,7 @@ use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
-use esp_idf_sys;
+use esp_idf_sys as _;
 
 // GPIO
 use esp_idf_hal::gpio;
@@ -24,6 +24,9 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 // TIME
 use esp_idf_hal::task::executor::{FreeRtosMonitor, Monitor, Notify};
 use esp_idf_svc::systime::EspSystemTime;
+
+// BLE
+use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
 // user modules
 mod encoder;
@@ -51,15 +54,33 @@ fn main() -> anyhow::Result<()> {
     let peripherals = Peripherals::take().unwrap();
 
     // disable watchdog, not sure if this works though
-    unsafe {
-        esp_idf_sys::esp_task_wdt_delete(esp_idf_sys::xTaskGetIdleTaskHandleForCPU(
-            esp_idf_hal::cpu::core() as u32,
-        ));
-    }
+    // unsafe {
+    //     esp_idf_sys::esp_task_wdt_delete(esp_idf_sys::xTaskGetIdleTaskHandleForCPU(
+    //         esp_idf_hal::cpu::core() as u32,
+    //     ));
+    // }
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
     neo.set_color("red", 0.2)?;
+
+    // Setup BLE server
+    let ble_device = BLEDevice::take();
+    let server = ble_device.get_server();
+    server.on_connect(|_| {
+        log::info!("Client connected");
+        ble_device.get_advertising().start().unwrap();
+    });
+    let ble_service = server.create_service(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
+
+    // Neopixel characteristic for testing
+    let neopixel_ble_char = ble_service.lock().create_characteristic(
+        uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
+        NimbleProperties::READ | NimbleProperties::Write,
+    );
+    neopixel_ble_char.lock().on_read(move |_, _| {
+        log::info!("Read rfom neopixel characteristic");
+    });
 
     // configure PWM on GPIO15 for motor 1
     let mut left_pwm_driver = LedcDriver::new(
@@ -82,31 +103,17 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Set up Pen
-    let mut pen = Pen::new(
-        peripherals.pins.gpio15,
-        peripherals.ledc.channel2,
-        peripherals.ledc.timer2,
-    )?;
+    // let mut pen = Pen::new(
+    //     peripherals.pins.gpio15,
+    //     peripherals.ledc.channel2,
+    //     peripherals.ledc.timer2,
+    // )?;
 
     // Sets motor direction
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     left_direction.set_low()?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
     right_direction.set_low()?;
-
-    // let max_duty = left_pwm_driver.get_max_duty(); // max duty should be the same for both
-
-    // Setup adc driver
-    let mut adc_driver = AdcDriver::new(
-        peripherals.adc2,
-        &adc::config::Config::new().calibration(true),
-    )?;
-
-    // setup analog input for pot_left and pot_right
-    let mut pot_left: AdcChannelDriver<'_, gpio::Gpio26, Atten11dB<_>> =
-        adc::AdcChannelDriver::new(peripherals.pins.gpio26)?;
-    let mut pot_right: AdcChannelDriver<'_, gpio::Gpio25, Atten11dB<_>> =
-        adc::AdcChannelDriver::new(peripherals.pins.gpio25)?;
 
     // set up encoder for each motor
     let left_encoder = Encoder::new(
@@ -152,28 +159,12 @@ fn main() -> anyhow::Result<()> {
     let mut left_pid = PidController::new(1.0, 0.1, 0.0);
     let mut right_pid = PidController::new(1.0, 0.1, 0.0);
 
-    // let mut state: PenState;
     loop {
-        // pen.up()?;
-        // FreeRtos::delay_ms(2000);
-        // state = pen.get_state()?;
-        // println!("State = {:?}", state);
-        // pen.down()?;
-        // FreeRtos::delay_ms(2000);
-        // state = pen.get_state()?;
-        // println!("State = {:?}", state);
-
-        // Get pot values
-        let pot_left_val = adc_driver.read(&mut pot_left).unwrap();
-        let pot_right_val = adc_driver.read(&mut pot_right).unwrap();
-        println!("pot left = {pot_left_val}");
-        println!("pot right = {pot_right_val}");
-
-        // map pot value to duty cycle
-        let target_left = utils::map(pot_left_val, POT_MIN, POT_MAX, 0u16, 257u16);
-        let target_right = utils::map(pot_right_val, POT_MIN, POT_MAX, 0u16, 270u16);
-        println!("target left = {target_left}");
-        println!("target right = {target_right}");
+        // set target rpm
+        let target_left = 100;
+        let target_right = 100;
+        println!("target left = {target_left} RPM");
+        println!("target right = {target_right} RPM");
 
         // Get the RPM of each motor
         let left_speed = LEFT_SPEED.load(Ordering::SeqCst);
@@ -190,7 +181,7 @@ fn main() -> anyhow::Result<()> {
         println!("-------------");
         println!("Motor 1:");
         println!(
-            "measured = {}\ntarget = {}\nu = {:.3}",
+            "measured = {}\ntarget = {}\nu = {:.3}\n",
             left_speed, target_left, u1
         );
         println!("-------------");

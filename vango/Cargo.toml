@@ -14,10 +14,7 @@ debug = true    # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
 [features]
-
 default = ["std", "hal", "esp-idf-sys/native"]
-
-
 pio = ["esp-idf-sys/pio"]
 all = ["std", "nightly", "experimental", "embassy"]
 hal = ["esp-idf-hal", "embedded-svc", "esp-idf-svc"]
@@ -33,10 +30,11 @@ esp-idf-sys = { version = "0.33", default-features = false }
 esp-idf-hal = { version = "0.41", optional = true, default-features = false, features=["edge-executor"]}
 esp-idf-svc = { version = "0.46", optional = true, default-features = false }
 embedded-svc = { version = "0.25", optional = true, default-features = false }
-critical-section = "*"
-esp-hal-common = { version = "0.9.0",  features = ["esp32","esp32_40mhz"]}
+critical-section = "1.1.1"
+# esp-hal-common = { version = "0.9.0",  features = ["esp32","esp32_40mhz"]}
 anyhow ="1"
-num-traits= "*"
+num-traits= "0.2.16"
+esp32-nimble = "0.1.3"
 
 [build-dependencies]
 embuild = "0.31.2"
