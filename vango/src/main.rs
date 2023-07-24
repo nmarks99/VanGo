@@ -7,14 +7,14 @@ use esp_idf_hal::prelude::*;
 use esp_idf_sys as _;
 
 // GPIO
-use esp_idf_hal::gpio;
+// use esp_idf_hal::gpio;
 use esp_idf_hal::gpio::PinDriver;
 
 // ADC
-use esp_idf_hal::adc;
-use esp_idf_hal::adc::AdcChannelDriver;
-use esp_idf_hal::adc::AdcDriver;
-use esp_idf_hal::adc::Atten11dB;
+// use esp_idf_hal::adc;
+// use esp_idf_hal::adc::AdcChannelDriver;
+// use esp_idf_hal::adc::AdcDriver;
+// use esp_idf_hal::adc::Atten11dB;
 
 // LEDC (PWM)
 use esp_idf_hal::ledc::config::TimerConfig;
@@ -38,13 +38,15 @@ use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
 use pen::{Pen, PenState};
 
-const POT_MIN: u16 = 128;
-const POT_MAX: u16 = 3139;
+// const POT_MIN: u16 = 128;
+// const POT_MAX: u16 = 3139;
 
 static LAST_COUNT_LEFT: AtomicI32 = AtomicI32::new(0);
 static LAST_COUNT_RIGHT: AtomicI32 = AtomicI32::new(0);
 static LEFT_SPEED: AtomicU32 = AtomicU32::new(0);
 static RIGHT_SPEED: AtomicU32 = AtomicU32::new(0);
+static TARGET_RPM_LEFT: AtomicU32 = AtomicU32::new(0);
+static TARGET_RPM_RIGHT: AtomicU32 = AtomicU32::new(0);
 
 #[allow(dead_code)]
 static SYS_TIMER: EspSystemTime = EspSystemTime {};
@@ -52,13 +54,7 @@ static SYS_TIMER: EspSystemTime = EspSystemTime {};
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     let peripherals = Peripherals::take().unwrap();
-
-    // disable watchdog, not sure if this works though
-    // unsafe {
-    //     esp_idf_sys::esp_task_wdt_delete(esp_idf_sys::xTaskGetIdleTaskHandleForCPU(
-    //         esp_idf_hal::cpu::core() as u32,
-    //     ));
-    // }
+    esp_idf_svc::log::EspLogger::initialize_default();
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
@@ -73,14 +69,46 @@ fn main() -> anyhow::Result<()> {
     });
     let ble_service = server.create_service(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
 
-    // Neopixel characteristic for testing
-    let neopixel_ble_char = ble_service.lock().create_characteristic(
+    // BLE characteristic for left motor
+    let left_ble_char = ble_service.lock().create_characteristic(
         uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
-        NimbleProperties::READ | NimbleProperties::Write,
+        NimbleProperties::READ | NimbleProperties::WRITE,
     );
-    neopixel_ble_char.lock().on_read(move |_, _| {
-        log::info!("Read rfom neopixel characteristic");
-    });
+    left_ble_char
+        .lock()
+        .on_read(move |v, _| {
+            let speed = LEFT_SPEED.load(Ordering::Relaxed);
+            v.set_value(&speed.to_le_bytes());
+            log::info!("Left speed = {:?}", speed);
+        })
+        .on_write(move |recv, _param| {
+            let string_recv = String::from_utf8(recv.to_vec()).unwrap();
+            log::info!("Setting left wheel to {}", string_recv);
+        });
+
+    // BLE characteristic for right motor
+    let right_ble_char = ble_service.lock().create_characteristic(
+        uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002"),
+        NimbleProperties::READ | NimbleProperties::WRITE,
+    );
+    right_ble_char
+        .lock()
+        .on_read(move |v, _| {
+            let speed = RIGHT_SPEED.load(Ordering::Relaxed);
+            v.set_value(&speed.to_le_bytes());
+            log::info!("Right speed = {:?}", speed);
+        })
+        .on_write(move |recv, _param| {
+            let string_recv = String::from_utf8(recv.to_vec()).unwrap();
+            log::info!("You wrote {:?}", string_recv);
+        });
+
+    // start BLE advertising
+    let ble_advertising = ble_device.get_advertising();
+    ble_advertising
+        .name("VanGo")
+        .add_service_uuid(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
+    ble_advertising.start().unwrap();
 
     // configure PWM on GPIO15 for motor 1
     let mut left_pwm_driver = LedcDriver::new(
@@ -127,7 +155,7 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio16,
     )?;
 
-    // Make a task for computing motor speed
+    // Make a task (timer interrupt) for computing motor speed
     let task_timer = esp_idf_svc::timer::EspTaskTimerService::new().unwrap();
     let monitor = FreeRtosMonitor::new();
     let monitor_notify = monitor.notifier();
@@ -160,11 +188,9 @@ fn main() -> anyhow::Result<()> {
     let mut right_pid = PidController::new(1.0, 0.1, 0.0);
 
     loop {
-        // set target rpm
-        let target_left = 100;
-        let target_right = 100;
-        println!("target left = {target_left} RPM");
-        println!("target right = {target_right} RPM");
+        // Get target speeds which are set in BLE callback
+        let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
+        let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
 
         // Get the RPM of each motor
         let left_speed = LEFT_SPEED.load(Ordering::SeqCst);
@@ -178,18 +204,18 @@ fn main() -> anyhow::Result<()> {
         left_pwm_driver.set_duty(u1 as u32)?;
         right_pwm_driver.set_duty(u2 as u32)?;
 
-        println!("-------------");
-        println!("Motor 1:");
-        println!(
-            "measured = {}\ntarget = {}\nu = {:.3}\n",
-            left_speed, target_left, u1
-        );
-        println!("-------------");
-        println!("Motor 2:");
-        println!(
-            "measured = {}\ntarget = {}\nu = {:.3}",
-            right_speed, target_right, u2
-        );
+        // println!("-------------");
+        // println!("Motor 1:");
+        // println!(
+        //     "measured = {}\ntarget = {}\nu = {:.3}\n",
+        //     left_speed, target_left, u1
+        // );
+        // println!("-------------");
+        // println!("Motor 2:");
+        // println!(
+        //     "measured = {}\ntarget = {}\nu = {:.3}",
+        //     right_speed, target_right, u2
+        // );
 
         FreeRtos::delay_ms(15);
     }

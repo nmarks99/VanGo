@@ -22,7 +22,8 @@ use termion::raw::IntoRawMode;
 
 mod cluster;
 
-const NEOPIXEL_CHARACTERISTIC: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
+const LEFT_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
+const RIGHT_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac120002);
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
 
 fn linspace(start: f32, stop: f32, num_points: usize) -> Vec<f32> {
@@ -119,61 +120,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let characteristics = service.discover_characteristics().await?;
     info!("Discovered characteristics");
 
-    // let mut neopixel_chr: Option<&Characteristic> = None;
-    let neopixel_chr = characteristics
+    let left_speed_chr = characteristics
         .iter()
-        .find(|x| x.uuid() == NEOPIXEL_CHARACTERISTIC)
-        .ok_or("Neopixel characteristic not found")?;
-    neopixel_chr.write(&[0x30]).await?;
+        .find(|x| x.uuid() == LEFT_UUID)
+        .ok_or("Left characteristic not found")?;
+    // left_speed_chr.write(&[0x30]).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
-    neopixel_chr.write(&[0x31]).await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    neopixel_chr.write(&[0x32]).await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    neopixel_chr.write(&[0x33]).await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    neopixel_chr.write(&[0x34]).await?;
+
+    let right_speed_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == RIGHT_UUID)
+        .ok_or("Right characteristic not found")?;
+    // right_speed_chr.write(&[0x30]).await?;
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().into_raw_mode().unwrap();
 
-    // clear the screen, move and hide cursor
-    write!(
-        stdout,
-        "{} {} {}",
-        termion::clear::All,
-        termion::cursor::Goto(1, 1),
-        termion::cursor::Hide
-    )
-    .unwrap();
-    stdout.flush().unwrap();
-
-    // ==============================
-
-    // assume the robot start at 0,0,pi/2
-    let start: Pose2D<f64> = Pose2D::new(0.0, 0.0, PI / 2.0);
-
-    // Get points along target trajectory
-    let points: Vec<Vector2D<f64>> = read_csv_trajectory("traj.csv")?;
-
-    // compute goal angle for each point along trajectory
-    // note that we are normalizing between -pi and pi
-    let mut theta_vec: Vec<f64> = vec![start.theta];
-    for i in 0..points.len() - 1 {
-        let th = utils::normalize_angle(
-            (points[i + 1].y - points[i].y).atan2(points[i + 1].x - points[i].x),
-        );
-        theta_vec.push(th);
-    }
-
-    let mut goal_pose_vec: Vec<Pose2D<f64>> = vec![start];
-    for i in 0..points.len() {
-        let pose = Pose2D::new(points[i].x, points[i].y, theta_vec[i]);
-        goal_pose_vec.push(pose);
-    }
-
-    // blocking, exit with q
     for c in stdin.keys() {
         write!(
             stdout,
@@ -184,30 +147,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
         let cmd: Option<&str> = match c.unwrap() {
-            Key::Up => {
-                println!("ON");
-                Some("UP")
-            }
-
-            Key::Down => {
-                println!("OFF");
-                Some("DOWN")
-            }
-
+            Key::Char('l') => Some("LEFT"),
+            Key::Char('r') => Some("RIGHT"),
+            Key::Char('w') => Some("WRITE"),
             Key::Char('q') => break,
-
             _ => None,
         };
 
         if cmd.is_some() {
-            if cmd.unwrap() == "UP" {
-                if let Err(err) = neopixel_chr.write(&[0x35]).await {
-                    eprintln!("Write to Neopixel characteristic failed, {}", err);
-                }
-            } else if cmd.unwrap() == "DOWN" {
-                if let Err(err) = neopixel_chr.write(&[0x32]).await {
-                    eprintln!("Write to Neopixel characteristic failed, {}", err);
-                }
+            if cmd.unwrap() == "LEFT" {
+                let left_speed = left_speed_chr.read().await.expect("Read failed");
+                print!("Left speed = {:?}", left_speed[0]);
+            } else if cmd.unwrap() == "RIGHT" {
+                let right_speed = right_speed_chr.read().await.expect("Read failed");
+                print!("Right speed = {:?}", right_speed[0]);
+            } else if cmd.unwrap() == "WRITE" {
+                print!("Setting left speed to 100");
+                let speed_str = "100";
+                left_speed_chr
+                    .write(speed_str.as_bytes())
+                    .await
+                    .expect("Failed to write");
             }
         }
 
@@ -223,6 +183,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
         termion::cursor::Show
     )
     .unwrap();
+
+    // ==============================
+
+    // assume the robot start at 0,0,pi/2
+    // let start: Pose2D<f64> = Pose2D::new(0.0, 0.0, PI / 2.0);
+
+    // Get points along target trajectory
+    // let points: Vec<Vector2D<f64>> = read_csv_trajectory("traj.csv")?;
+
+    // compute goal angle for each point along trajectory
+    // note that we are normalizing between -pi and pi
+    // let mut theta_vec: Vec<f64> = vec![start.theta];
+    // for i in 0..points.len() - 1 {
+    //     let th = utils::normalize_angle(
+    //         (points[i + 1].y - points[i].y).atan2(points[i + 1].x - points[i].x),
+    //     );
+    //     theta_vec.push(th);
+    // }
+    //
+    // let mut goal_pose_vec: Vec<Pose2D<f64>> = vec![start];
+    // for i in 0..points.len() {
+    //     let pose = Pose2D::new(points[i].x, points[i].y, theta_vec[i]);
+    //     goal_pose_vec.push(pose);
+    // }
 
     // for each pose in goal_pose_vec:
     // - get the wheel angles from encoders with BLE
