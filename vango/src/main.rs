@@ -69,7 +69,15 @@ fn main() -> anyhow::Result<()> {
     });
     let ble_service = server.create_service(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
 
-    // BLE characteristic for left motor
+    // BLE characteristics for each motor
+    // when the client reads from the characteristic,
+    // the on_read callback will atomic load the current RPM value
+    // of the corresponding motor. When the client writes a
+    // value (speed target) to the characteristic, the on_write
+    // callback will convert the &[u8] to an interger
+    // and then atomic store the value in the global variable
+
+    // BLE characteristic for right motor
     let left_ble_char = ble_service.lock().create_characteristic(
         uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
         NimbleProperties::READ | NimbleProperties::WRITE,
@@ -82,8 +90,9 @@ fn main() -> anyhow::Result<()> {
             log::info!("Left speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
-            let string_recv = String::from_utf8(recv.to_vec()).unwrap();
-            log::info!("Setting left wheel to {}", string_recv);
+            let speed_target_recv: u32 = utils::bytes_to_int(recv).unwrap();
+            log::info!("Left speed target {:?}", speed_target_recv);
+            TARGET_RPM_LEFT.store(speed_target_recv, Ordering::SeqCst);
         });
 
     // BLE characteristic for right motor
@@ -99,8 +108,9 @@ fn main() -> anyhow::Result<()> {
             log::info!("Right speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
-            let string_recv = String::from_utf8(recv.to_vec()).unwrap();
-            log::info!("You wrote {:?}", string_recv);
+            let speed_target_recv: u32 = utils::bytes_to_int(recv).unwrap();
+            log::info!("Right speed target {:?}", speed_target_recv);
+            TARGET_RPM_RIGHT.store(speed_target_recv, Ordering::SeqCst);
         });
 
     // start BLE advertising

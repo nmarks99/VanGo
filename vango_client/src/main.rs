@@ -149,7 +149,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let cmd: Option<&str> = match c.unwrap() {
             Key::Char('l') => Some("LEFT"),
             Key::Char('r') => Some("RIGHT"),
-            Key::Char('w') => Some("WRITE"),
+            Key::Char('w') => Some("START"),
+            Key::Char('s') => Some("STOP"),
             Key::Char('q') => break,
             _ => None,
         };
@@ -161,10 +162,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             } else if cmd.unwrap() == "RIGHT" {
                 let right_speed = right_speed_chr.read().await.expect("Read failed");
                 print!("Right speed = {:?}", right_speed[0]);
-            } else if cmd.unwrap() == "WRITE" {
-                print!("Setting left speed to 100");
+            } else if cmd.unwrap() == "START" {
+                print!("Setting right speed to 100");
                 let speed_str = "100";
-                left_speed_chr
+                right_speed_chr
+                    .write(speed_str.as_bytes())
+                    .await
+                    .expect("Failed to write");
+            } else if cmd.unwrap() == "STOP" {
+                print!("Stopping right motor");
+                let speed_str = "0";
+                right_speed_chr
                     .write(speed_str.as_bytes())
                     .await
                     .expect("Failed to write");
