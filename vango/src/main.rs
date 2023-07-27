@@ -77,7 +77,7 @@ fn main() -> anyhow::Result<()> {
     // callback will convert the &[u8] to an interger
     // and then atomic store the value in the global variable
 
-    // BLE characteristic for right motor
+    // BLE characteristic for left motor
     let left_ble_char = ble_service.lock().create_characteristic(
         uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
         NimbleProperties::READ | NimbleProperties::WRITE,
@@ -201,6 +201,11 @@ fn main() -> anyhow::Result<()> {
         // Get target speeds which are set in BLE callback
         let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
         let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
+
+        // TODO:
+        // if target > 0, set_direction(1)
+        // else if target < 0 set_direction(0)
+        // take absolute value of target to pass to PID?
 
         // Get the RPM of each motor
         let left_speed = LEFT_SPEED.load(Ordering::SeqCst);

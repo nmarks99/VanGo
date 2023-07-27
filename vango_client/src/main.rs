@@ -72,6 +72,8 @@ fn read_csv_trajectory(csv_path: &str) -> anyhow::Result<Vec<Vector2D<f64>>> {
 const WHEEL_RADIUS: f64 = 0.042;
 const WHEEL_SEPARATION: f64 = 0.100;
 const MAX_SPEED: f64 = 25.0;
+const MAX_RPM: u8 = 250;
+const BASE_RPM: u8 = 100;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -136,6 +138,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+    let mut speed: u8 = BASE_RPM;
+    // let mut left_speed: u8 = 0;
+    // let mut right_speed: u8 = 0;
 
     for c in stdin.keys() {
         write!(
@@ -146,38 +151,70 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .unwrap();
 
-        let cmd: Option<&str> = match c.unwrap() {
-            Key::Char('l') => Some("LEFT"),
-            Key::Char('r') => Some("RIGHT"),
-            Key::Char('w') => Some("START"),
-            Key::Char('s') => Some("STOP"),
+        match c.unwrap() {
+            // Forward
+            Key::Char('i') => {
+                // equal positive left and right speeds
+            }
+
+            // Backward
+            Key::Char(',') => {
+                // equal negative left and right speeds
+            }
+
+            // Clockwise
+            Key::Char('l') => {
+                // opposite direction, equal magnitude left and right speeds
+            }
+
+            // Counter-clockwise
+            Key::Char('j') => {
+                // opposite direction, equal magnitude left and right speeds
+            }
+
+            // Stop
+            Key::Char('k') => {
+                // both left and right speeds are zero
+            }
+
+            // Increase speed
+            Key::Up => {
+                speed = speed + (speed as f32 * 0.1) as u8;
+            }
+
+            // Decrease speed
+            Key::Down => {
+                speed = speed - (speed as f32 * 0.1) as u8;
+            }
+
+            // Exit
             Key::Char('q') => break,
-            _ => None,
+            _ => {}
         };
 
-        if cmd.is_some() {
-            if cmd.unwrap() == "LEFT" {
-                let left_speed = left_speed_chr.read().await.expect("Read failed");
-                print!("Left speed = {:?}", left_speed[0]);
-            } else if cmd.unwrap() == "RIGHT" {
-                let right_speed = right_speed_chr.read().await.expect("Read failed");
-                print!("Right speed = {:?}", right_speed[0]);
-            } else if cmd.unwrap() == "START" {
-                print!("Setting right speed to 100");
-                let speed_str = "100";
-                right_speed_chr
-                    .write(speed_str.as_bytes())
-                    .await
-                    .expect("Failed to write");
-            } else if cmd.unwrap() == "STOP" {
-                print!("Stopping right motor");
-                let speed_str = "0";
-                right_speed_chr
-                    .write(speed_str.as_bytes())
-                    .await
-                    .expect("Failed to write");
-            }
-        }
+        // if cmd.is_some() {
+        //     if cmd.unwrap() == "LEFT" {
+        //         let left_speed = left_speed_chr.read().await.expect("Read failed");
+        //         print!("Left speed = {:?}", left_speed[0]);
+        //     } else if cmd.unwrap() == "RIGHT" {
+        //         let right_speed = right_speed_chr.read().await.expect("Read failed");
+        //         print!("Right speed = {:?}", right_speed[0]);
+        //     } else if cmd.unwrap() == "START" {
+        //         print!("Setting right speed to 100");
+        //         let speed_str = "100";
+        //         right_speed_chr
+        //             .write(speed_str.as_bytes())
+        //             .await
+        //             .expect("Failed to write");
+        //     } else if cmd.unwrap() == "STOP" {
+        //         print!("Stopping right motor");
+        //         let speed_str = "0";
+        //         right_speed_chr
+        //             .write(speed_str.as_bytes())
+        //             .await
+        //             .expect("Failed to write");
+        //     }
+        // }
 
         stdout.flush().unwrap();
     }
