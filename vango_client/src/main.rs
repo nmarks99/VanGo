@@ -20,11 +20,17 @@ use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
+use num_traits::{PrimInt, Signed};
+
 mod cluster;
 
-const LEFT_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
-const RIGHT_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac120002);
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
+
+const LEFT_SPEED_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
+const RIGHT_SPEED_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac120002);
+
+const LEFT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a286b70_2c2b_11ee_be56_0242ac120002);
+const RIGHT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a28672e_2c2b_11ee_be56_0242ac120002);
 
 fn linspace(start: f32, stop: f32, num_points: usize) -> Vec<f32> {
     let step = (stop - start) / (num_points - 1) as f32;
@@ -69,9 +75,16 @@ fn read_csv_trajectory(csv_path: &str) -> anyhow::Result<Vec<Vector2D<f64>>> {
     Ok(points)
 }
 
+// Converts a signed integer to a Vec<u8>
+pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
+    let num_string = (num.to_i64().unwrap()).to_string();
+    let num_bytes_vec = num_string.as_bytes().to_vec();
+    num_bytes_vec
+}
+
 const WHEEL_RADIUS: f64 = 0.042;
 const WHEEL_SEPARATION: f64 = 0.100;
-const MAX_SPEED: f64 = 25.0;
+// const MAX_SPEED: f64 = 25.0;
 const MAX_RPM: u8 = 250;
 const BASE_RPM: u8 = 100;
 
@@ -124,23 +137,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let left_speed_chr = characteristics
         .iter()
-        .find(|x| x.uuid() == LEFT_UUID)
-        .ok_or("Left characteristic not found")?;
-    // left_speed_chr.write(&[0x30]).await?;
+        .find(|x| x.uuid() == LEFT_SPEED_UUID)
+        .ok_or("Left speed characteristic not found")?;
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let right_speed_chr = characteristics
         .iter()
-        .find(|x| x.uuid() == RIGHT_UUID)
-        .ok_or("Right characteristic not found")?;
-    // right_speed_chr.write(&[0x30]).await?;
+        .find(|x| x.uuid() == RIGHT_SPEED_UUID)
+        .ok_or("Right speed characteristic not found")?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let left_counts_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == LEFT_COUNTS_UUID)
+        .ok_or("Left count characteristic not found")?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let right_counts_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
+        .ok_or("Right count characteristic not found")?;
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().into_raw_mode().unwrap();
-    let mut speed: u8 = BASE_RPM;
-    // let mut left_speed: u8 = 0;
-    // let mut right_speed: u8 = 0;
+    let mut speed: i16 = BASE_RPM.into();
+    let mut left_speed: i16 = -50;
+    let mut right_speed: i16 = 50;
 
     for c in stdin.keys() {
         write!(
@@ -151,40 +174,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .unwrap();
 
+        // TODO: fix this so it properly "latches" and you can adjust speed while latched
         match c.unwrap() {
             // Forward
             Key::Char('i') => {
+                println!("Forward!");
                 // equal positive left and right speeds
+                left_speed = speed;
+                right_speed = speed;
             }
 
             // Backward
             Key::Char(',') => {
+                println!("Backward!");
+                left_speed = -speed;
+                right_speed = -speed;
                 // equal negative left and right speeds
             }
 
             // Clockwise
             Key::Char('l') => {
+                println!("Clockwise!");
+                left_speed = speed;
+                right_speed = -speed;
                 // opposite direction, equal magnitude left and right speeds
             }
 
             // Counter-clockwise
             Key::Char('j') => {
+                println!("Counter-Clockwise!");
+                left_speed = -speed;
+                right_speed = speed;
                 // opposite direction, equal magnitude left and right speeds
             }
 
             // Stop
             Key::Char('k') => {
                 // both left and right speeds are zero
+                println!("Stop!");
+                left_speed = 0;
+                right_speed = 0;
             }
 
             // Increase speed
             Key::Up => {
-                speed = speed + (speed as f32 * 0.1) as u8;
+                speed = speed + (speed as f32 * 0.1) as i16;
             }
 
             // Decrease speed
             Key::Down => {
-                speed = speed - (speed as f32 * 0.1) as u8;
+                speed = speed - (speed as f32 * 0.1) as i16;
             }
 
             // Exit
@@ -192,6 +231,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ => {}
         };
 
+        // TODO: this won't work, need to handle signs to convert i16 to &[u8]
+        let right_speed_bytes = int_to_bytes(right_speed);
+        right_speed_chr
+            .write(&right_speed_bytes)
+            .await
+            .expect("failed to set right speed");
+
+        let left_speed_bytes = int_to_bytes(left_speed);
+        left_speed_chr
+            .write(&left_speed_bytes)
+            .await
+            .expect("failed to set right speed");
+
+        let left_count = left_counts_chr.read().await.expect("read failed");
+        let right_count = right_counts_chr.read().await.expect("read failed");
+        // println!("Left count = {:?}", left_count);
+        // println!("Left count = {:?}", left_count);
         // if cmd.is_some() {
         //     if cmd.unwrap() == "LEFT" {
         //         let left_speed = left_speed_chr.read().await.expect("Read failed");

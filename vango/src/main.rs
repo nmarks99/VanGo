@@ -1,5 +1,5 @@
 // basics
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI16, AtomicI32, AtomicU32, Ordering};
 use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
@@ -7,7 +7,7 @@ use esp_idf_hal::prelude::*;
 use esp_idf_sys as _;
 
 // GPIO
-// use esp_idf_hal::gpio;
+use esp_idf_hal::gpio::Level;
 use esp_idf_hal::gpio::PinDriver;
 
 // ADC
@@ -38,15 +38,15 @@ use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
 use pen::{Pen, PenState};
 
-// const POT_MIN: u16 = 128;
-// const POT_MAX: u16 = 3139;
+// Set in timer interrupt
+static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
+static RIGHT_COUNT: AtomicI32 = AtomicI32::new(0);
+static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
+static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 
-static LAST_COUNT_LEFT: AtomicI32 = AtomicI32::new(0);
-static LAST_COUNT_RIGHT: AtomicI32 = AtomicI32::new(0);
-static LEFT_SPEED: AtomicU32 = AtomicU32::new(0);
-static RIGHT_SPEED: AtomicU32 = AtomicU32::new(0);
-static TARGET_RPM_LEFT: AtomicU32 = AtomicU32::new(0);
-static TARGET_RPM_RIGHT: AtomicU32 = AtomicU32::new(0);
+// Set by BLE callbacks
+static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
+static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
 #[allow(dead_code)]
 static SYS_TIMER: EspSystemTime = EspSystemTime {};
@@ -78,40 +78,62 @@ fn main() -> anyhow::Result<()> {
     // and then atomic store the value in the global variable
 
     // BLE characteristic for left motor
-    let left_ble_char = ble_service.lock().create_characteristic(
+    let left_speed_blec = ble_service.lock().create_characteristic(
         uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
         NimbleProperties::READ | NimbleProperties::WRITE,
     );
-    left_ble_char
+    left_speed_blec
         .lock()
         .on_read(move |v, _| {
-            let speed = LEFT_SPEED.load(Ordering::Relaxed);
+            let speed = LEFT_RPM.load(Ordering::Relaxed);
             v.set_value(&speed.to_le_bytes());
             log::info!("Left speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
-            let speed_target_recv: u32 = utils::bytes_to_int(recv).unwrap();
-            log::info!("Left speed target {:?}", speed_target_recv);
-            TARGET_RPM_LEFT.store(speed_target_recv, Ordering::SeqCst);
+            let rpm_target_recv: i16 = utils::bytes_to_int(recv).unwrap();
+            log::info!("Left speed target {:?}", rpm_target_recv);
+            TARGET_RPM_LEFT.store(rpm_target_recv, Ordering::SeqCst);
         });
 
     // BLE characteristic for right motor
-    let right_ble_char = ble_service.lock().create_characteristic(
+    let right_speed_blec = ble_service.lock().create_characteristic(
         uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002"),
         NimbleProperties::READ | NimbleProperties::WRITE,
     );
-    right_ble_char
+    right_speed_blec
         .lock()
         .on_read(move |v, _| {
-            let speed = RIGHT_SPEED.load(Ordering::Relaxed);
+            let speed = RIGHT_RPM.load(Ordering::Relaxed);
             v.set_value(&speed.to_le_bytes());
             log::info!("Right speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
-            let speed_target_recv: u32 = utils::bytes_to_int(recv).unwrap();
-            log::info!("Right speed target {:?}", speed_target_recv);
-            TARGET_RPM_RIGHT.store(speed_target_recv, Ordering::SeqCst);
+            let rpm_target_recv: i16 = utils::bytes_to_int(recv).unwrap();
+            log::info!("Right speed target {:?}", rpm_target_recv);
+            TARGET_RPM_RIGHT.store(rpm_target_recv, Ordering::SeqCst);
         });
+
+    // BLE characteristics for reading right encoder counts
+    let right_counts_blec = ble_service.lock().create_characteristic(
+        uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002"),
+        NimbleProperties::READ,
+    );
+    right_counts_blec.lock().on_read(move |v, _| {
+        let counts = RIGHT_COUNT.load(Ordering::Relaxed);
+        v.set_value(&counts.to_le_bytes());
+        log::info!("Right counts read: {:?}", counts);
+    });
+
+    // BLE characteristics for reading left encoder counts
+    let left_counts_blec = ble_service.lock().create_characteristic(
+        uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002"),
+        NimbleProperties::READ,
+    );
+    left_counts_blec.lock().on_read(move |v, _| {
+        let counts = LEFT_COUNT.load(Ordering::Relaxed);
+        v.set_value(&counts.to_le_bytes());
+        log::info!("Left counts read: {:?}", counts);
+    });
 
     // start BLE advertising
     let ble_advertising = ble_device.get_advertising();
@@ -175,17 +197,19 @@ fn main() -> anyhow::Result<()> {
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
 
+            // Get left counts and RPM
             let count1 = left_encoder.get_value().unwrap() as i32;
-            let last_count1 = LAST_COUNT_LEFT.load(Ordering::SeqCst) as i32;
+            let last_count1 = LEFT_COUNT.load(Ordering::SeqCst) as i32;
             let left_speed: f32 = (count1 - last_count1).abs() as f32 * TICKS_TO_RPM;
-            LEFT_SPEED.store(left_speed as u32, Ordering::SeqCst);
-            LAST_COUNT_LEFT.store(count1, Ordering::SeqCst);
+            LEFT_RPM.store(left_speed as i16, Ordering::SeqCst);
+            LEFT_COUNT.store(count1, Ordering::SeqCst);
 
+            // Get right counts and RPM
             let count2 = right_encoder.get_value().unwrap() as i32;
-            let last_count2 = LAST_COUNT_RIGHT.load(Ordering::SeqCst) as i32;
+            let last_count2 = RIGHT_COUNT.load(Ordering::SeqCst) as i32;
             let right_speed: f32 = (count2 - last_count2).abs() as f32 * TICKS_TO_RPM;
-            RIGHT_SPEED.store(right_speed as u32, Ordering::SeqCst);
-            LAST_COUNT_RIGHT.store(count2, Ordering::SeqCst);
+            RIGHT_RPM.store(right_speed as i16, Ordering::SeqCst);
+            RIGHT_COUNT.store(count2, Ordering::SeqCst);
         })
         .unwrap();
 
@@ -194,30 +218,41 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     use control::PidController;
-    let mut left_pid = PidController::new(1.0, 0.1, 0.0);
-    let mut right_pid = PidController::new(1.0, 0.1, 0.0);
+    let mut left_pid = PidController::new(1.0, 0.0, 0.0);
+    let mut right_pid = PidController::new(1.0, 0.0, 0.0);
 
     loop {
         // Get target speeds which are set in BLE callback
         let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
         let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
 
-        // TODO:
-        // if target > 0, set_direction(1)
-        // else if target < 0 set_direction(0)
-        // take absolute value of target to pass to PID?
+        // Set direction based on sign of target speed
+        let left_dir = if target_left < 0 {
+            Level::High
+        } else {
+            Level::Low
+        };
+
+        let right_dir = if target_right > 0 {
+            Level::High
+        } else {
+            Level::Low
+        };
+        left_direction.set_level(left_dir)?;
+        right_direction.set_level(right_dir)?;
 
         // Get the RPM of each motor
-        let left_speed = LEFT_SPEED.load(Ordering::SeqCst);
-        let right_speed = RIGHT_SPEED.load(Ordering::SeqCst);
+        // let left_speed = LEFT_RPM.load(Ordering::SeqCst);
+        // let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
 
         // Compute control signal to send from PID controller
-        let u1 = left_pid.compute(target_left as f32, left_speed as f32);
-        let u2 = right_pid.compute(target_right as f32, right_speed as f32);
+        // TODO: Check if this makes sense
+        // let u1 = left_pid.compute(target_left as f32, left_speed as f32);
+        // let u2 = right_pid.compute(target_right as f32, right_speed as f32);
 
         // Set duty cycle for each motor
-        left_pwm_driver.set_duty(u1 as u32)?;
-        right_pwm_driver.set_duty(u2 as u32)?;
+        left_pwm_driver.set_duty(target_left.abs() as u32)?;
+        right_pwm_driver.set_duty(target_right.abs() as u32)?;
 
         // println!("-------------");
         // println!("Motor 1:");

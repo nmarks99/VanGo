@@ -28,6 +28,7 @@ tracing = "0.1.36"
 tracing-subscriber = {version = "0.3.17", features = ["env-filter"] }
 tokio = { version = "1.20.1", features = ["macros", "rt-multi-thread", "time"] }
 termion = "2.0.1"
+num-traits = "0.2.16"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 uuid = "1.1.1"
