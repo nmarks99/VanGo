@@ -55,7 +55,7 @@ pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
     num_bytes_vec
 }
 
-/// Converts an array of bytes to a signed integer
+/// Converts an array of ASCII byte literals to a signed integer
 /// Example:
 /// let x1: i16 = bytes_to_int(&[b'-', b'1', b'2']).unwrap();
 /// let x2: i16 = bytes_to_int(&[b'1', b'2']).unwrap();
@@ -78,4 +78,14 @@ pub fn bytes_to_int<T: PrimInt + Signed>(arr: &[u8]) -> Option<T> {
         }
     }
     Some(T::from(sign).unwrap() * result)
+}
+
+pub fn u8_to_bytes(arr: &[u8]) -> Vec<u8> {
+    let mut byte_literals = Vec::with_capacity(arr.len());
+    for &digit in arr {
+        // Convert the u8 digit to its corresponding ASCII code
+        let ascii_code = b'0' + digit;
+        byte_literals.push(ascii_code);
+    }
+    byte_literals
 }

@@ -11,13 +11,13 @@ use std::io::Write;
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-use termion::{color, style};
+// use termion::{color, style};
 
 mod cluster;
 mod utils;
 
-use std::env;
-use utils::{bytes_to_int, int_to_bytes};
+// use std::env;
+use utils::{bytes_to_int, int_to_bytes, u8_to_bytes};
 
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
 const LEFT_SPEED_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
@@ -32,7 +32,7 @@ const BASE_RPM: u8 = 100;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let manual_mode = true;
+    let manual_mode = false;
 
     // TODO: use clap for command line args
     // let args: Vec<String> = env::args().collect();
@@ -90,25 +90,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .find(|x| x.uuid() == LEFT_SPEED_UUID)
         .ok_or("Left speed characteristic not found")?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let right_speed_chr = characteristics
         .iter()
         .find(|x| x.uuid() == RIGHT_SPEED_UUID)
         .ok_or("Right speed characteristic not found")?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let left_counts_chr = characteristics
         .iter()
         .find(|x| x.uuid() == LEFT_COUNTS_UUID)
         .ok_or("Left count characteristic not found")?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let right_counts_chr = characteristics
         .iter()
         .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
         .ok_or("Right count characteristic not found")?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     info!("Connected all characteristics");
     info!(
@@ -117,9 +117,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Manual mode is remote control mode with the keyboard
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().into_raw_mode().unwrap();
     if manual_mode {
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
         let mut speed: i16 = BASE_RPM.into();
         let mut left_speed: i16 = 0;
         let mut right_speed: i16 = 0;
@@ -200,7 +200,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 _ => {}
             }
-            stdout.flush().unwrap();
 
             let right_speed_bytes = int_to_bytes(right_speed);
             right_speed_chr
@@ -214,16 +213,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
                 .expect("failed to set right speed");
 
-            let left_count_bytes = left_counts_chr.read().await.expect("read failed");
-            let right_count_bytes = right_counts_chr.read().await.expect("read failed");
-            print!(
-                "Left count = {}\r\n",
-                bytes_to_int::<i32>(&left_count_bytes).unwrap_or(0)
-            );
-            print!(
-                "Right count = {}\r\n",
-                bytes_to_int::<i32>(&right_count_bytes).unwrap_or(0)
-            );
+            // let right_count_bytes = right_counts_chr.read().await.expect("read failed");
+            // println!("right count: {:?}\r\n", right_count_bytes);
+
+            stdout.flush().unwrap();
+
+            // if let Some(left_count_i16) = bytes_to_int::<i16>(&left_count_bytes) {
+            //     print!("left count: {:?}\r\n", left_count_i16);
+            // } else {
+            //     print!("left?\r\n");
+            // }
+            // if let Some(right_count_i16) = bytes_to_int::<i16>(&right_count_bytes) {
+            //     print!("right count: {:?}\r\n", right_count_i16);
+            // } else {
+            //     print!("right?\r\n");
+            // }
         }
 
         // clear screen, move and show cursor at the end
@@ -238,8 +242,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Autonomous mode
     } else {
+        let right_speed_bytes: Vec<u8> = int_to_bytes(50);
+        right_speed_chr
+            .write(&right_speed_bytes)
+            .await
+            .expect("failed to set right speed");
+
+        let left_speed_bytes = int_to_bytes(50);
+        left_speed_chr
+            .write(&left_speed_bytes)
+            .await
+            .expect("failed to set right speed");
+
+        loop {
+            let left_count_u8_slice = left_counts_chr.read().await.unwrap();
+            print!("left count: {:?}\r\n", left_count_u8_slice);
+            // let left_count_byte_literals = u8_to_bytes(&left_count_u8_slice);
+            // println!("{:?}", left_count_byte_literals);
+            // let right_count_bytes = right_counts_chr.read().await.expect("read failed");
+            // print!("right count: {:?}\r\n", right_count_bytes);
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
         // =============================
-        unimplemented!("Autonomous mode not done yet")
 
         // assume the robot start at 0,0,pi/2
         // let start: Pose2D<f64> = Pose2D::new(0.0, 0.0, PI / 2.0);

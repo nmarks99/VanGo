@@ -52,3 +52,10 @@ pub fn bytes_to_int<T: PrimInt + Signed>(arr: &[u8]) -> Option<T> {
     }
     Some(T::from(sign).unwrap() * result)
 }
+
+// Converts a signed integer to a Vec<u8>
+pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
+    let num_string = (num.to_i64().unwrap()).to_string();
+    let num_bytes_vec = num_string.as_bytes().to_vec();
+    num_bytes_vec
+}

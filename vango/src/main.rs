@@ -1,5 +1,5 @@
 // basics
-use core::sync::atomic::{AtomicI16, AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI16, AtomicI32, Ordering};
 use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
@@ -9,12 +9,6 @@ use esp_idf_sys as _;
 // GPIO
 use esp_idf_hal::gpio::Level;
 use esp_idf_hal::gpio::PinDriver;
-
-// ADC
-// use esp_idf_hal::adc;
-// use esp_idf_hal::adc::AdcChannelDriver;
-// use esp_idf_hal::adc::AdcDriver;
-// use esp_idf_hal::adc::Atten11dB;
 
 // LEDC (PWM)
 use esp_idf_hal::ledc::config::TimerConfig;
@@ -36,7 +30,7 @@ mod utils;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
-use pen::{Pen, PenState};
+// use pen::{Pen, PenState};
 
 // Set in timer interrupt
 static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -58,7 +52,7 @@ fn main() -> anyhow::Result<()> {
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
-    neo.set_color("red", 0.2)?;
+    neo.set_color("blue", 0.2)?;
 
     // Setup BLE server
     let ble_device = BLEDevice::take();
@@ -86,7 +80,7 @@ fn main() -> anyhow::Result<()> {
         .lock()
         .on_read(move |v, _| {
             let speed = LEFT_RPM.load(Ordering::Relaxed);
-            v.set_value(&speed.to_le_bytes());
+            v.set_value(&utils::int_to_bytes(speed));
             log::info!("Left speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
@@ -104,7 +98,7 @@ fn main() -> anyhow::Result<()> {
         .lock()
         .on_read(move |v, _| {
             let speed = RIGHT_RPM.load(Ordering::Relaxed);
-            v.set_value(&speed.to_le_bytes());
+            v.set_value(&utils::int_to_bytes(speed));
             log::info!("Right speed = {:?}", speed);
         })
         .on_write(move |recv, _param| {
@@ -120,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     );
     right_counts_blec.lock().on_read(move |v, _| {
         let counts = RIGHT_COUNT.load(Ordering::Relaxed);
-        v.set_value(&counts.to_le_bytes());
+        v.set_value(&utils::int_to_bytes(counts));
         log::info!("Right counts read: {:?}", counts);
     });
 
@@ -131,7 +125,7 @@ fn main() -> anyhow::Result<()> {
     );
     left_counts_blec.lock().on_read(move |v, _| {
         let counts = LEFT_COUNT.load(Ordering::Relaxed);
-        v.set_value(&counts.to_le_bytes());
+        v.set_value(&utils::int_to_bytes(counts));
         log::info!("Left counts read: {:?}", counts);
     });
 
@@ -217,9 +211,9 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
-    use control::PidController;
-    let mut left_pid = PidController::new(1.0, 0.0, 0.0);
-    let mut right_pid = PidController::new(1.0, 0.0, 0.0);
+    // use control::PidController;
+    // let mut left_pid = PidController::new(1.0, 0.0, 0.0);
+    // let mut right_pid = PidController::new(1.0, 0.0, 0.0);
 
     loop {
         // Get target speeds which are set in BLE callback
