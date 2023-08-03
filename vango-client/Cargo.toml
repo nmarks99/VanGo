@@ -1,5 +1,5 @@
 [package]
-name = "vango_client"
+name = "vango-client"
 version = "0.1.0"
 edition = "2021"
 
