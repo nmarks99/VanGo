@@ -34,6 +34,7 @@ critical-section = "1.1.1"
 anyhow ="1"
 num-traits= "0.2.16"
 esp32-nimble = "0.1.3"
+vango-utils = {path="../vango-utils/"}
 
 [build-dependencies]
 embuild = "0.31.2"

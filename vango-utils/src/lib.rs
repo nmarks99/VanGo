@@ -1,8 +1,25 @@
-#![allow(dead_code)]
-use num_traits::Float;
-use num_traits::{PrimInt, Signed};
+//! [![github]](https://github.com/nmarks99/VanGo/vango-utils)&ensp;
+//!
+//! [github]: https://img.shields.io/badge/github-8da0cb?style=for-the-badge&labelColor=555555&logo=github
+//!
+//! <br>
+//!
+//! This library contains various functions used by both the VanGo
+//! firmware, and VanGo desktop client.
+//!
+//! <br>
+//!
+//! # Details
+//! TODO: explain more here
 
-// linear mapping between two ranges, similar to arduino's map function
+use num_traits::{Float, PrimInt, Signed};
+
+/// checks if two floats are within some threshold of each of other
+pub fn almost_equal<T: Float>(d1: T, d2: T, epsilon: T) -> bool {
+    (d1 - d2).abs() < epsilon
+}
+
+/// linear mapping between two ranges, similar to arduino's map function
 pub fn map<T: PrimInt>(x: T, xmin: T, xmax: T, ymin: T, ymax: T) -> T {
     assert!(xmin < xmax, "xmin must be less than xmax");
     let x_ratio = (x - xmin).to_f32().unwrap() / (xmax - xmin).to_f32().unwrap();
@@ -10,28 +27,12 @@ pub fn map<T: PrimInt>(x: T, xmin: T, xmax: T, ymin: T, ymax: T) -> T {
     T::from(res).expect("conversion failed")
 }
 
-// checks if two floats are within some threshold of each of other
-pub fn almost_equal<T: Float>(d1: T, d2: T, epsilon: T) -> bool {
-    (d1 - d2).abs() < epsilon
-}
-
-// pub fn bytes_to_int<T: PrimInt>(arr: &[u8]) -> Option<T> {
-//     let mut result = T::zero();
-//     for &byte in arr {
-//         if byte >= b'0' && byte <= b'9' {
-//             result =
-//                 result * T::from(10).unwrap() + (T::from(byte).unwrap() - T::from(b'0').unwrap());
-//         } else {
-//             return None;
-//         }
-//     }
-//     Some(result)
-// }
-
 /// Converts an array of bytes to a signed integer
 /// Example:
+/// ```
 /// let x1: i16 = bytes_to_int(&[b'-', b'1', b'2']).unwrap();
 /// let x2: i16 = bytes_to_int(&[b'1', b'2']).unwrap();
+/// ```
 /// x1 here will be -12, x2 will be 12
 pub fn bytes_to_int<T: PrimInt + Signed>(arr: &[u8]) -> Option<T> {
     let mut result = T::zero();
@@ -58,4 +59,9 @@ pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
     let num_string = (num.to_i64().unwrap()).to_string();
     let num_bytes_vec = num_string.as_bytes().to_vec();
     num_bytes_vec
+}
+
+#[cfg(test)]
+mod tests {
+    // use super::*;
 }

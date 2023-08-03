@@ -26,10 +26,11 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 mod encoder;
 mod neopixel;
 mod pen;
-mod utils;
+// mod utils;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
+use vango_utils as utils;
 // use pen::{Pen, PenState};
 
 // Set in timer interrupt
