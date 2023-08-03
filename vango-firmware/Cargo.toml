@@ -1,5 +1,5 @@
 [package]
-name = "vango"
+name = "vango-firmware"
 version = "0.1.0"
 authors = ["Nick Marks <nmarks99@gmail.com>"]
 edition = "2021"
