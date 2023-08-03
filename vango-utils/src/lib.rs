@@ -12,6 +12,7 @@
 //! # Details
 //! TODO: explain more here
 
+use log::warn;
 use num_traits::{Float, PrimInt, Signed};
 
 /// checks if two floats are within some threshold of each of other
@@ -27,9 +28,10 @@ pub fn map<T: PrimInt>(x: T, xmin: T, xmax: T, ymin: T, ymax: T) -> T {
     T::from(res).expect("conversion failed")
 }
 
-/// Converts an array of bytes to a signed integer
+/// Converts a slice of byte literals to a signed integer
 /// Example:
 /// ```
+/// use vango_utils::bytes_to_int;
 /// let x1: i16 = bytes_to_int(&[b'-', b'1', b'2']).unwrap();
 /// let x2: i16 = bytes_to_int(&[b'1', b'2']).unwrap();
 /// ```
@@ -54,14 +56,52 @@ pub fn bytes_to_int<T: PrimInt + Signed>(arr: &[u8]) -> Option<T> {
     Some(T::from(sign).unwrap() * result)
 }
 
-// Converts a signed integer to a Vec<u8>
+/// Converts a signed integer to a Vec<u8>
 pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
-    let num_string = (num.to_i64().unwrap()).to_string();
+    let num_string: String;
+    if cfg!(target_pointer_width = "64") {
+        num_string = (num.to_i64().unwrap()).to_string();
+    } else if cfg!(target_pointer_width = "32") {
+        num_string = (num.to_i32().unwrap()).to_string();
+    } else {
+        warn!("Unknown architecture pointer width");
+        num_string = (num.to_i32().unwrap()).to_string();
+    }
     let num_bytes_vec = num_string.as_bytes().to_vec();
     num_bytes_vec
 }
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+
+    #[test]
+    fn test_bytes_to_int_positive() {
+        let int_result: i32 = bytes_to_int(&[b'1', b'2', b'3']).unwrap();
+        assert_eq!(int_result, 123);
+    }
+
+    #[test]
+    fn test_bytes_to_int_negative() {
+        let int_result: i32 = bytes_to_int(&[b'-', b'1', b'2', b'3']).unwrap();
+        assert_eq!(int_result, -123);
+    }
+
+    #[test]
+    fn test_int_to_bytes_positive() {
+        let x_bytes = int_to_bytes(123i32);
+        let check = vec![b'1', b'2', b'3'];
+        for i in 0..x_bytes.len() {
+            assert_eq!(x_bytes[i], check[i]);
+        }
+    }
+
+    #[test]
+    fn test_int_to_bytes_negative() {
+        let x_bytes = int_to_bytes(-123i32);
+        let check = vec![b'-', b'1', b'2', b'3'];
+        for i in 0..x_bytes.len() {
+            assert_eq!(x_bytes[i], check[i]);
+        }
+    }
 }
