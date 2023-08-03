@@ -29,13 +29,15 @@ pub fn map<T: PrimInt>(x: T, xmin: T, xmax: T, ymin: T, ymax: T) -> T {
 }
 
 /// Converts a slice of byte literals to a signed integer
+///
 /// Example:
 /// ```
 /// use vango_utils::bytes_to_int;
 /// let x1: i16 = bytes_to_int(&[b'-', b'1', b'2']).unwrap();
 /// let x2: i16 = bytes_to_int(&[b'1', b'2']).unwrap();
+/// assert_eq!(x1, -12);
+/// assert_eq!(x2, 12);
 /// ```
-/// x1 here will be -12, x2 will be 12
 pub fn bytes_to_int<T: PrimInt + Signed>(arr: &[u8]) -> Option<T> {
     let mut result = T::zero();
     let mut sign: i8 = 1;
