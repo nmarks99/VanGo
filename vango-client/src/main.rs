@@ -14,10 +14,10 @@ use termion::raw::IntoRawMode;
 // use termion::{color, style};
 
 mod cluster;
-mod utils;
+// mod utils;
 
 // use std::env;
-use utils::{bytes_to_int, int_to_bytes, u8_to_bytes};
+use vango_utils::{bytes_to_int, int_to_bytes};
 
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
 const LEFT_SPEED_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
