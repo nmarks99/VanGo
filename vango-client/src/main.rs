@@ -8,10 +8,11 @@ use tracing::info;
 use tracing::metadata::LevelFilter;
 
 use std::io::Write;
+use std::sync::Arc;
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-// use termion::{color, style};
+use tokio::sync::Mutex;
 
 mod cluster;
 // mod utils;
@@ -96,19 +97,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .find(|x| x.uuid() == RIGHT_SPEED_UUID)
         .ok_or("Right speed characteristic not found")?;
-    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let left_counts_chr = characteristics
         .iter()
         .find(|x| x.uuid() == LEFT_COUNTS_UUID)
         .ok_or("Left count characteristic not found")?;
-    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let right_counts_chr = characteristics
         .iter()
         .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
         .ok_or("Right count characteristic not found")?;
-    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     info!("Connected all characteristics");
     info!(
@@ -213,21 +211,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
                 .expect("failed to set right speed");
 
-            // let right_count_bytes = right_counts_chr.read().await.expect("read failed");
-            // println!("right count: {:?}\r\n", right_count_bytes);
-
             stdout.flush().unwrap();
-
-            // if let Some(left_count_i16) = bytes_to_int::<i16>(&left_count_bytes) {
-            //     print!("left count: {:?}\r\n", left_count_i16);
-            // } else {
-            //     print!("left?\r\n");
-            // }
-            // if let Some(right_count_i16) = bytes_to_int::<i16>(&right_count_bytes) {
-            //     print!("right count: {:?}\r\n", right_count_i16);
-            // } else {
-            //     print!("right?\r\n");
-            // }
         }
 
         // clear screen, move and show cursor at the end
@@ -242,28 +226,90 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Autonomous mode
     } else {
-        let right_speed_bytes: Vec<u8> = int_to_bytes(50);
+        let right_speed_bytes: Vec<u8> = int_to_bytes(-50);
         right_speed_chr
             .write(&right_speed_bytes)
             .await
             .expect("failed to set right speed");
 
-        let left_speed_bytes = int_to_bytes(50);
+        let left_speed_bytes = int_to_bytes(-50);
         left_speed_chr
             .write(&left_speed_bytes)
             .await
             .expect("failed to set right speed");
 
-        loop {
-            let left_count_u8_slice = left_counts_chr.read().await.unwrap();
-            print!("left count: {:?}\r\n", left_count_u8_slice);
-            // let left_count_byte_literals = u8_to_bytes(&left_count_u8_slice);
-            // println!("{:?}", left_count_byte_literals);
-            // let right_count_bytes = right_counts_chr.read().await.expect("read failed");
-            // print!("right count: {:?}\r\n", right_count_bytes);
+        // Setup a task to print out info
+        let left_counts_chr1 = left_counts_chr.clone();
+        let right_counts_chr1 = right_counts_chr.clone();
+        let left_speed_chr1 = left_speed_chr.clone();
+        let right_speed_chr1 = right_speed_chr.clone();
+        let task_handle = tokio::spawn(async move {
+            loop {
+                write!(
+                    stdout,
+                    "{}{}",
+                    termion::cursor::Goto(1, 1),
+                    termion::clear::CurrentLine
+                )
+                .unwrap();
+                // all these reads are slow for some reason...
+                let left_count_bytes = left_counts_chr1.read().await.unwrap();
+                let right_count_bytes = right_counts_chr1.read().await.unwrap();
+                let left_count_int = bytes_to_int::<i32>(&left_count_bytes).unwrap();
+                let right_count_int = bytes_to_int::<i32>(&right_count_bytes).unwrap();
 
-            tokio::time::sleep(Duration::from_millis(100)).await;
+                let left_speed_bytes = left_speed_chr1.read().await.unwrap();
+                let right_speed_bytes = right_speed_chr1.read().await.unwrap();
+                let left_speed_int = bytes_to_int::<i32>(&left_speed_bytes).unwrap();
+                let right_speed_int = bytes_to_int::<i32>(&right_speed_bytes).unwrap();
+
+                print!("Count: {}, {}\r\n", left_count_int, right_count_int);
+                print!("Speed: {}, {}\r\n", left_speed_int, right_speed_int);
+            }
+        });
+
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+
+        write!(
+            stdout,
+            "{}{}q to exit{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Hide
+        )
+        .unwrap();
+        stdout.flush().unwrap();
+        for c in stdin.keys() {
+            match c.unwrap() {
+                Key::Char('q') => {
+                    let right_speed_bytes: Vec<u8> = int_to_bytes(0);
+                    right_speed_chr
+                        .write(&right_speed_bytes)
+                        .await
+                        .expect("failed to set right speed");
+
+                    let left_speed_bytes = int_to_bytes(0);
+                    left_speed_chr
+                        .write(&left_speed_bytes)
+                        .await
+                        .expect("failed to set right speed");
+                    task_handle.abort();
+                    break;
+                }
+                _ => {}
+            }
+            stdout.flush().unwrap();
         }
+        write!(
+            stdout,
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Show
+        )
+        .unwrap();
+        write!(stdout, "{}", termion::cursor::Show).unwrap();
 
         // =============================
 
