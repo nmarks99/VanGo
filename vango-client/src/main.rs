@@ -3,21 +3,18 @@ use std::error::Error;
 
 use bluest::{Adapter, Uuid};
 use futures_util::StreamExt;
-use std::time::Duration;
+// use std::time::Duration;
 use tracing::info;
 use tracing::metadata::LevelFilter;
 
 use std::io::Write;
-use std::sync::Arc;
 use termion::event::Key;
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
-use tokio::sync::Mutex;
 
 mod cluster;
-// mod utils;
+use diff_drive::rigid2d::Vector2D;
 
-// use std::env;
 use vango_utils::{bytes_to_int, int_to_bytes};
 
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
@@ -25,15 +22,24 @@ const LEFT_SPEED_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebed
 const RIGHT_SPEED_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac120002);
 const LEFT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a286b70_2c2b_11ee_be56_0242ac120002);
 const RIGHT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a28672e_2c2b_11ee_be56_0242ac120002);
+const WAYPOINT_UUID: Uuid = Uuid::from_u128(0x21e16dea_357a_11ee_be56_0242ac120002);
 
 // const WHEEL_RADIUS: f64 = 0.042;
 // const WHEEL_SEPARATION: f64 = 0.100;
 // const MAX_RPM: u8 = 250;
 const BASE_RPM: u8 = 100;
 
+#[derive(PartialEq, Debug)]
+enum Mode {
+    Manual,
+    Auto,
+    Debug,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let manual_mode = false;
+    let mode = Mode::Debug;
+    println!("Mode: {:?}", mode);
 
     // TODO: use clap for command line args
     // let args: Vec<String> = env::args().collect();
@@ -91,7 +97,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .find(|x| x.uuid() == LEFT_SPEED_UUID)
         .ok_or("Left speed characteristic not found")?;
-    // tokio::time::sleep(Duration::from_secs(1)).await;
 
     let right_speed_chr = characteristics
         .iter()
@@ -108,16 +113,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
         .ok_or("Right count characteristic not found")?;
 
+    // TODO: Implement this!
+    let waypoint_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == WAYPOINT_UUID)
+        .ok_or("Waypoint characteristic not found")?;
     info!("Connected all characteristics");
-    info!(
-        "Mode: {}",
-        if manual_mode { "Manual" } else { "Autonomous" }
-    );
 
     // Manual mode is remote control mode with the keyboard
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout().into_raw_mode().unwrap();
-    if manual_mode {
+    if mode == Mode::Manual {
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+
         let mut speed: i16 = BASE_RPM.into();
         let mut left_speed: i16 = 0;
         let mut right_speed: i16 = 0;
@@ -225,7 +232,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
     // Autonomous mode
-    } else {
+    } else if mode == Mode::Auto {
+        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+
         let right_speed_bytes: Vec<u8> = int_to_bytes(-50);
         right_speed_chr
             .write(&right_speed_bytes)
@@ -340,6 +349,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // - get current pose estimate from odometry given wheel angles (FK)
         // - compute the optimal controls (wheel speeds)
         // - send control signals to motors with BLE
+    } else if mode == Mode::Debug {
+
+        // let waypoint: Vector2D<f32> = Vector2D::new(2.71, 3.14);
+        // let waypoint_vec = waypoint.to_vec();
+        // let waypoint_string: Vec<String> = waypoint_vec.iter().map(|&f| f.to_string()).collect();
+        // let waypoint_slice = &waypoint_string[..];
+        // println!("waypoint string = {:?}", waypoint_slice);
+
+        // waypoint_chr
+        //     .write(&waypoint_slice)
+        //     .await
+        //     .expect("failed to set right speed");
     }
 
     Ok(())

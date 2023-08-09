@@ -47,12 +47,12 @@ static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
 // BLE UUIDs
-const SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
-const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
+const VANGO_SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
 const LEFT_SPEED_UUID: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
 const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002");
-const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
+const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
+const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -75,7 +75,7 @@ fn main() -> anyhow::Result<()> {
             .update_conn_params(desc.conn_handle, 6, 12, 0, 60)
             .unwrap()
     });
-    let ble_service = server.create_service(SERVICE_UUID);
+    let ble_service = server.create_service(VANGO_SERVICE_UUID);
 
     // BLE characteristic for waypoints
     let waypoint_blec = ble_service
@@ -144,7 +144,9 @@ fn main() -> anyhow::Result<()> {
 
     // start BLE advertising
     let ble_advertising = ble_device.get_advertising();
-    ble_advertising.name("VanGo").add_service_uuid(SERVICE_UUID);
+    ble_advertising
+        .name("VanGo")
+        .add_service_uuid(VANGO_SERVICE_UUID);
     ble_advertising.start().unwrap();
 
     // configure PWM on GPIO15 for motor 1
