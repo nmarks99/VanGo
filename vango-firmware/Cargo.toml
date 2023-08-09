@@ -31,8 +31,9 @@ esp-idf-hal = { version = "0.41", optional = true, default-features = false, fea
 esp-idf-svc = { version = "0.46", optional = true, default-features = false }
 embedded-svc = { version = "0.25", optional = true, default-features = false }
 critical-section = "1.1.1"
-anyhow ="1"
-num-traits= "0.2.16"
+anyhow = "1"
+atomic_float ="0.1.0"
+num-traits = "0.2.16"
 vango-utils = {path="../vango-utils/"}
 diff-drive = {git = "https://github.com/nmarks99/diff_drive.git" }
 esp32-nimble = {git ="https://github.com/taks/esp32-nimble.git"}

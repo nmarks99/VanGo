@@ -1,5 +1,6 @@
 // basics
-use core::sync::atomic::{AtomicI16, AtomicI32, Ordering};
+use atomic_float::AtomicF32;
+use core::sync::atomic::{AtomicBool, AtomicI16, AtomicI32, Ordering};
 use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
@@ -46,6 +47,10 @@ static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
+static KP: AtomicF32 = AtomicF32::new(1.0);
+static KI: AtomicF32 = AtomicF32::new(0.0);
+static KD: AtomicF32 = AtomicF32::new(0.0);
+
 // BLE UUIDs
 const VANGO_SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
 const LEFT_SPEED_UUID: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
@@ -53,6 +58,7 @@ const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002
 const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
 const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
+const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -84,6 +90,58 @@ fn main() -> anyhow::Result<()> {
     waypoint_blec.lock().on_write(move |recv, _param| {
         let waypoint_bytes = recv;
         log::info!("Waypoint: {:?}", waypoint_bytes);
+    });
+
+    // let mut kp: f32 = 1.0;
+    // let mut ki: f32 = 0.0;
+    // let mut kd: f32 = 0.0;
+
+    let pid_blec = ble_service
+        .lock()
+        .create_characteristic(PID_UUID, NimbleProperties::WRITE | NimbleProperties::READ);
+    pid_blec.lock().on_write(move |recv, _param| {
+        log::info!("Tuning characteristic-> got: {:?}", recv);
+        if recv.len() == 3 {
+            let perc: Option<f32> = match recv[2] {
+                b'1' => Some(0.05),
+                b'2' => Some(0.1),
+                b'3' => Some(0.2),
+                b'4' => Some(0.5),
+                b'5' => Some(1.0),
+                b'6' => Some(10.0),
+                _ => None,
+            };
+
+            if perc.is_some() {
+                let mut kp: f32 = KP.load(Ordering::Relaxed);
+                let mut ki: f32 = KI.load(Ordering::Relaxed);
+                let mut kd: f32 = KD.load(Ordering::Relaxed);
+                match recv[0] {
+                    b'P' => match recv[1] {
+                        b'+' => kp = kp + kp * perc.unwrap(),
+                        b'-' => kp = kp - kp * perc.unwrap(),
+                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                    },
+                    b'I' => match recv[1] {
+                        b'+' => ki = ki + ki * perc.unwrap(),
+                        b'-' => ki = ki - ki * perc.unwrap(),
+                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                    },
+                    b'D' => match recv[1] {
+                        b'+' => kd = kd + kd * perc.unwrap(),
+                        b'-' => kd = kd - kd * perc.unwrap(),
+                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                    },
+                    _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                }
+                log::info!("Storing {},{},{}", kp, ki, kd);
+                KP.store(kp, Ordering::Relaxed);
+                KI.store(ki, Ordering::Relaxed);
+                KD.store(kd, Ordering::Relaxed);
+            }
+        } else {
+            log::warn!("Recieved invalid PID tuning command: {:?}", recv);
+        }
     });
 
     // BLE characteristic for left motor speed
@@ -224,23 +282,38 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
-    // use control::PidController;
-    // let mut left_pid = PidController::new(1.0, 0.0, 0.0);
-    // let mut right_pid = PidController::new(1.0, 0.0, 0.0);
+    use control::PidController;
+    let mut left_pid = PidController::new(0.0, 0.0, 0.0);
+    let mut right_pid = PidController::new(0.0, 0.0, 0.0);
 
+    let mut count = 0;
     loop {
+        // Set gains again since they can be adjusted by the client
+        let kp = KP.load(Ordering::Relaxed);
+        let ki = KI.load(Ordering::Relaxed);
+        let kd = KD.load(Ordering::Relaxed);
+        left_pid.set_gains(kp, ki, kd);
+        right_pid.set_gains(kp, ki, kd);
+
         // Get target speeds which are set in BLE callback
         let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
         let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
 
-        // Set direction based on sign of target speed
-        let left_dir = if target_left < 0 {
+        // Get the RPM of each motor
+        let left_speed = LEFT_RPM.load(Ordering::SeqCst);
+        let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
+
+        // Compute control signal to send from PID controller
+        let u_left = left_pid.compute(target_left as f32, left_speed as f32);
+        let u_right = right_pid.compute(target_right as f32, right_speed as f32);
+
+        // Set direction based on sign of control signal
+        let left_dir = if u_left < 0.0 {
             Level::High
         } else {
             Level::Low
         };
-
-        let right_dir = if target_right > 0 {
+        let right_dir = if u_right > 0.0 {
             Level::High
         } else {
             Level::Low
@@ -248,33 +321,40 @@ fn main() -> anyhow::Result<()> {
         left_direction.set_level(left_dir)?;
         right_direction.set_level(right_dir)?;
 
-        // Get the RPM of each motor
-        // let left_speed = LEFT_RPM.load(Ordering::SeqCst);
-        // let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
-
-        // Compute control signal to send from PID controller
-        // TODO: Check if this makes sense
-        // let u1 = left_pid.compute(target_left as f32, left_speed as f32);
-        // let u2 = right_pid.compute(target_right as f32, right_speed as f32);
-
         // Set duty cycle for each motor
-        left_pwm_driver.set_duty(target_left.abs() as u32)?;
-        right_pwm_driver.set_duty(target_right.abs() as u32)?;
+        left_pwm_driver.set_duty(u_left.abs() as u32)?;
+        right_pwm_driver.set_duty(u_right.abs() as u32)?;
 
-        // println!("-------------");
-        // println!("Motor 1:");
-        // println!(
-        //     "measured = {}\ntarget = {}\nu = {:.3}\n",
-        //     left_speed, target_left, u1
-        // );
-        // println!("-------------");
-        // println!("Motor 2:");
-        // println!(
-        //     "measured = {}\ntarget = {}\nu = {:.3}",
-        //     right_speed, target_right, u2
-        // );
+        println!(
+            "{},{},{},{},{},{}",
+            left_speed,
+            right_speed,
+            u_left,
+            u_right,
+            u_left.abs(),
+            u_right.abs()
+        );
+        // if count == 10 {
+        //     log::info!("Gains = {},{},{}", kp, ki, kd);
+        //     log::info!(
+        //         "Left:\nCurrent = {}\nTarget={}\nu={}\n\n",
+        //         left_speed,
+        //         target_left,
+        //         u_left
+        //     );
+        //     log::info!(
+        //         "Right:\nCurrent = {}\nTarget={}\nu={}\n",
+        //         right_speed,
+        //         target_right,
+        //         u_right
+        //     );
+        //     println!("==============================");
+        //     count = 0
+        // } else {
+        //     count += 1;
+        // }
 
-        FreeRtos::delay_ms(15);
+        FreeRtos::delay_ms(1);
     }
 }
 

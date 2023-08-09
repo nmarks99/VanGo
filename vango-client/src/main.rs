@@ -3,7 +3,7 @@ use std::error::Error;
 
 use bluest::{Adapter, Uuid};
 use futures_util::StreamExt;
-// use std::time::Duration;
+use std::time::Duration;
 use tracing::info;
 use tracing::metadata::LevelFilter;
 
@@ -23,6 +23,7 @@ const RIGHT_SPEED_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac1
 const LEFT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a286b70_2c2b_11ee_be56_0242ac120002);
 const RIGHT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a28672e_2c2b_11ee_be56_0242ac120002);
 const WAYPOINT_UUID: Uuid = Uuid::from_u128(0x21e16dea_357a_11ee_be56_0242ac120002);
+const PID_UUID: Uuid = Uuid::from_u128(0x3cedc40e_3655_11ee_be56_0242ac120002);
 
 // const WHEEL_RADIUS: f64 = 0.042;
 // const WHEEL_SEPARATION: f64 = 0.100;
@@ -33,12 +34,13 @@ const BASE_RPM: u8 = 100;
 enum Mode {
     Manual,
     Auto,
+    Tune,
     Debug,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mode = Mode::Debug;
+    let mode = Mode::Tune;
     println!("Mode: {:?}", mode);
 
     // TODO: use clap for command line args
@@ -113,11 +115,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
         .ok_or("Right count characteristic not found")?;
 
-    // TODO: Implement this!
     let waypoint_chr = characteristics
         .iter()
         .find(|x| x.uuid() == WAYPOINT_UUID)
         .ok_or("Waypoint characteristic not found")?;
+
+    let pid_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == PID_UUID)
+        .ok_or("PID characteristic not found")?;
+
     info!("Connected all characteristics");
 
     // Manual mode is remote control mode with the keyboard
@@ -361,6 +368,134 @@ async fn main() -> Result<(), Box<dyn Error>> {
         //     .write(&waypoint_slice)
         //     .await
         //     .expect("failed to set right speed");
+    } else if mode == Mode::Tune {
+        // loop {
+        //
+        //
+        //
+        //     pid_chr
+        //         .write("P+1".as_bytes())
+        //         .await
+        //         .expect("Failed to write to PID characteristic");
+        //     tokio::time::sleep(Duration::from_secs(1)).await;
+        // }
+
+        // Setup a task to generate a square wave
+        // let left_speed_chr1 = left_speed_chr.clone();
+        // let right_speed_chr1 = right_speed_chr.clone();
+        // let task_handle = tokio::spawn(async move {
+        //     loop {
+        //         left_speed_chr1
+        //             .write(&int_to_bytes(30))
+        //             .await
+        //             .expect("Failed to set left speed");
+        //         right_speed_chr1
+        //             .write(&int_to_bytes(30))
+        //             .await
+        //             .expect("Failed to set right speed");
+        //         tokio::time::sleep(Duration::from_millis(500)).await;
+        //         left_speed_chr1
+        //             .write(&int_to_bytes(-30))
+        //             .await
+        //             .expect("Failed to set left speed");
+        //         right_speed_chr1
+        //             .write(&int_to_bytes(-30))
+        //             .await
+        //             .expect("Failed to set right speed");
+        //         tokio::time::sleep(Duration::from_millis(500)).await;
+        //     }
+        // });
+
+        left_speed_chr
+            .write(&int_to_bytes(100))
+            .await
+            .expect("Failed to set left speed");
+        right_speed_chr
+            .write(&int_to_bytes(100))
+            .await
+            .expect("Failed to set right speed");
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
+
+        write!(
+            stdout,
+            "{}{}q to exit{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Hide
+        )
+        .unwrap();
+        stdout.flush().unwrap();
+        for c in stdin.keys() {
+            match c.unwrap() {
+                Key::Char('q') => {
+                    right_speed_chr
+                        .write(&int_to_bytes(0))
+                        .await
+                        .expect("failed to set right speed");
+                    left_speed_chr
+                        .write(&int_to_bytes(0))
+                        .await
+                        .expect("failed to set right speed");
+                    // task_handle.abort();
+                    break;
+                }
+
+                Key::Char('P') => {
+                    pid_chr
+                        .write("P+2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                Key::Char('p') => {
+                    pid_chr
+                        .write("P-2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                Key::Char('I') => {
+                    pid_chr
+                        .write("I+2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                Key::Char('i') => {
+                    pid_chr
+                        .write("I-2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                Key::Char('D') => {
+                    pid_chr
+                        .write("D+2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                Key::Char('d') => {
+                    pid_chr
+                        .write("D-2".as_bytes())
+                        .await
+                        .expect("Failed to write to PID characteristic");
+                }
+
+                _ => {}
+            }
+            stdout.flush().unwrap();
+        }
+        write!(
+            stdout,
+            "{}{}{}",
+            termion::clear::All,
+            termion::cursor::Goto(1, 1),
+            termion::cursor::Show
+        )
+        .unwrap();
+        write!(stdout, "{}", termion::cursor::Show).unwrap();
     }
 
     Ok(())
