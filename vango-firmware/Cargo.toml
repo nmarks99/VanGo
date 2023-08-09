@@ -33,8 +33,9 @@ embedded-svc = { version = "0.25", optional = true, default-features = false }
 critical-section = "1.1.1"
 anyhow ="1"
 num-traits= "0.2.16"
-esp32-nimble = "0.1.3"
 vango-utils = {path="../vango-utils/"}
+diff-drive = {git = "https://github.com/nmarks99/diff_drive.git" }
+esp32-nimble = {git ="https://github.com/taks/esp32-nimble.git"}
 
 [build-dependencies]
 embuild = "0.31.2"

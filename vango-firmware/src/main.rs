@@ -6,6 +6,8 @@ use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
 use esp_idf_sys as _;
 
+// use diff_drive::rigid2d::Vector2D;
+
 // GPIO
 use esp_idf_hal::gpio::Level;
 use esp_idf_hal::gpio::PinDriver;
@@ -17,39 +19,47 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 
 // TIME
 use esp_idf_hal::task::executor::{FreeRtosMonitor, Monitor, Notify};
-use esp_idf_svc::systime::EspSystemTime;
+// use esp_idf_svc::systime::EspSystemTime;
+// static SYS_TIMER: EspSystemTime = EspSystemTime {};
 
 // BLE
+use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
-// user modules
+// local modules
 mod encoder;
 mod neopixel;
 mod pen;
-// mod utils;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
 use neopixel::Neopixel;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
 
-// Set in timer interrupt
+// Measured encoder counts and speeds set in timer interrupt
 static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
 static RIGHT_COUNT: AtomicI32 = AtomicI32::new(0);
 static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
 static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 
-// Set by BLE callbacks
+// Target speeds set by BLE callbacks
 static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
-#[allow(dead_code)]
-static SYS_TIMER: EspSystemTime = EspSystemTime {};
+// BLE UUIDs
+const SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
+const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
+const LEFT_SPEED_UUID: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
+const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002");
+const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
+const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     let peripherals = Peripherals::take().unwrap();
     esp_idf_svc::log::EspLogger::initialize_default();
+
+    // let mut waypoints_vec: Vec<>
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
@@ -58,23 +68,27 @@ fn main() -> anyhow::Result<()> {
     // Setup BLE server
     let ble_device = BLEDevice::take();
     let server = ble_device.get_server();
-    server.on_connect(|_| {
+    server.on_connect(|server, desc| {
         log::info!("Client connected");
         ble_device.get_advertising().start().unwrap();
+        server
+            .update_conn_params(desc.conn_handle, 6, 12, 0, 60)
+            .unwrap()
     });
-    let ble_service = server.create_service(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
+    let ble_service = server.create_service(SERVICE_UUID);
 
-    // BLE characteristics for each motor
-    // when the client reads from the characteristic,
-    // the on_read callback will atomic load the current RPM value
-    // of the corresponding motor. When the client writes a
-    // value (speed target) to the characteristic, the on_write
-    // callback will convert the &[u8] to an interger
-    // and then atomic store the value in the global variable
+    // BLE characteristic for waypoints
+    let waypoint_blec = ble_service
+        .lock()
+        .create_characteristic(WAYPOINT_UUID, NimbleProperties::WRITE);
+    waypoint_blec.lock().on_write(move |recv, _param| {
+        let waypoint_bytes = recv;
+        log::info!("Waypoint: {:?}", waypoint_bytes);
+    });
 
-    // BLE characteristic for left motor
+    // BLE characteristic for left motor speed
     let left_speed_blec = ble_service.lock().create_characteristic(
-        uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295"),
+        LEFT_SPEED_UUID,
         NimbleProperties::READ | NimbleProperties::WRITE,
     );
     left_speed_blec
@@ -90,9 +104,9 @@ fn main() -> anyhow::Result<()> {
             TARGET_RPM_LEFT.store(rpm_target_recv, Ordering::SeqCst);
         });
 
-    // BLE characteristic for right motor
+    // BLE characteristic for right motor speed
     let right_speed_blec = ble_service.lock().create_characteristic(
-        uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002"),
+        RIGHT_SPEED_UUID,
         NimbleProperties::READ | NimbleProperties::WRITE,
     );
     right_speed_blec
@@ -109,10 +123,9 @@ fn main() -> anyhow::Result<()> {
         });
 
     // BLE characteristics for reading right encoder counts
-    let right_counts_blec = ble_service.lock().create_characteristic(
-        uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002"),
-        NimbleProperties::READ,
-    );
+    let right_counts_blec = ble_service
+        .lock()
+        .create_characteristic(RIGHT_COUNTS_UUID, NimbleProperties::READ);
     right_counts_blec.lock().on_read(move |v, _| {
         let counts = RIGHT_COUNT.load(Ordering::Relaxed);
         v.set_value(&utils::int_to_bytes(counts));
@@ -120,10 +133,9 @@ fn main() -> anyhow::Result<()> {
     });
 
     // BLE characteristics for reading left encoder counts
-    let left_counts_blec = ble_service.lock().create_characteristic(
-        uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002"),
-        NimbleProperties::READ,
-    );
+    let left_counts_blec = ble_service
+        .lock()
+        .create_characteristic(LEFT_COUNTS_UUID, NimbleProperties::READ);
     left_counts_blec.lock().on_read(move |v, _| {
         let counts = LEFT_COUNT.load(Ordering::Relaxed);
         v.set_value(&utils::int_to_bytes(counts));
@@ -132,9 +144,7 @@ fn main() -> anyhow::Result<()> {
 
     // start BLE advertising
     let ble_advertising = ble_device.get_advertising();
-    ble_advertising
-        .name("VanGo")
-        .add_service_uuid(uuid128!("21470560-232e-11ee-be56-0242ac120002"));
+    ble_advertising.name("VanGo").add_service_uuid(SERVICE_UUID);
     ble_advertising.start().unwrap();
 
     // configure PWM on GPIO15 for motor 1
