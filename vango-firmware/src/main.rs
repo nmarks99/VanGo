@@ -56,7 +56,7 @@ static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
-static KP: AtomicF32 = AtomicF32::new(0.1);
+static KP: AtomicF32 = AtomicF32::new(0.3);
 static KI: AtomicF32 = AtomicF32::new(0.0);
 static KD: AtomicF32 = AtomicF32::new(0.0);
 
@@ -100,10 +100,6 @@ fn main() -> anyhow::Result<()> {
         let waypoint_bytes = recv;
         log::info!("Waypoint: {:?}", waypoint_bytes);
     });
-
-    // let mut kp: f32 = 1.0;
-    // let mut ki: f32 = 0.0;
-    // let mut kd: f32 = 0.0;
 
     let pid_blec = ble_service
         .lock()
@@ -335,17 +331,10 @@ fn main() -> anyhow::Result<()> {
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
 
+            // print every 10th
             let mut c = PRINT_LIMITER.load(Ordering::Relaxed);
             if c > 10 {
-                println!("===================================");
-                println!("Error: {}, {}", err_left, err_right);
-                println!("Speed: {}, {}", left_speed, right_speed);
-                println!("Count: {}, {}", left_count, right_count);
-                println!(
-                    "Angle: {}, {}",
-                    left_angle * 180.0 / 3.1415,
-                    right_angle * 180.0 / 3.1415
-                );
+                println!("{}, {}", left_speed, right_speed);
                 c = 0;
             } else {
                 c += 1;
@@ -358,152 +347,78 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
-    // use control::PidController;
-    // let mut left_pid = PidController::new(0.0, 0.0, 0.0);
-    // let mut right_pid = PidController::new(0.0, 0.0, 0.0);
-
     loop {
         TARGET.store(0.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
+        FreeRtos::delay_ms(5000);
 
-        TARGET.store(9.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
+        TARGET.store(10.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(5000);
 
         TARGET.store(20.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
-    }
-    // let mut count = 0;
-    // loop {
-    //     // Set gains again since they can be adjusted by the client
-    //     let kp = KP.load(Ordering::Relaxed);
-    //     let ki = KI.load(Ordering::Relaxed);
-    //     let kd = KD.load(Ordering::Relaxed);
-    //     left_pid.set_gains(kp, ki, kd);
-    //     right_pid.set_gains(kp, ki, kd);
-    //
-    //     // Get target speeds which are set in BLE callback
-    //     let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
-    //     let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
-    //
-    //     // Get the RPM of each motor
-    //     let left_speed = LEFT_RPM.load(Ordering::SeqCst);
-    //     let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
-    //
-    //     // Compute control signal to send from PID controller
-    //     let u_left = left_pid.compute(target_left as f32, left_speed as f32);
-    //     let u_right = right_pid.compute(target_right as f32, right_speed as f32);
-    //
-    //     // Set direction based on sign of control signal
-    //     let left_dir = if u_left < 0.0 {
-    //         Level::High
-    //     } else {
-    //         Level::Low
-    //     };
-    //     let right_dir = if u_right > 0.0 {
-    //         Level::High
-    //     } else {
-    //         Level::Low
-    //     };
-    //     left_direction.set_level(left_dir)?;
-    //     right_direction.set_level(right_dir)?;
-    //
-    //     // Set duty cycle for each motor
-    //     left_pwm_driver.set_duty(u_left.abs() as u32)?;
-    //     right_pwm_driver.set_duty(u_right.abs() as u32)?;
-    //
-    //     println!(
-    //         "{},{},{},{},{},{}",
-    //         left_speed,
-    //         right_speed,
-    //         u_left,
-    //         u_right,
-    //         u_left.abs(),
-    //         u_right.abs()
-    //     );
-    //     // if count == 10 {
-    //     //     log::info!("Gains = {},{},{}", kp, ki, kd);
-    //     //     log::info!(
-    //     //         "Left:\nCurrent = {}\nTarget={}\nu={}\n\n",
-    //     //         left_speed,
-    //     //         target_left,
-    //     //         u_left
-    //     //     );
-    //     //     log::info!(
-    //     //         "Right:\nCurrent = {}\nTarget={}\nu={}\n",
-    //     //         right_speed,
-    //     //         target_right,
-    //     //         u_right
-    //     //     );
-    //     //     println!("==============================");
-    //     //     count = 0
-    //     // } else {
-    //     //     count += 1;
-    //     // }
-    //
-    //     FreeRtos::delay_ms(1);
-    // }
-}
-
-mod control {
-    #![allow(dead_code)]
-    pub struct PidController {
-        target: f32,
-        kp: f32,
-        ki: f32,
-        kd: f32,
-        err: f32,
-        i_err: f32,
-        d_err: f32,
-        last_err: f32,
-    }
-
-    impl PidController {
-        pub fn new(kp: f32, ki: f32, kd: f32) -> Self {
-            PidController {
-                target: 0.0,
-                kp,
-                ki,
-                kd,
-                err: 0.0,
-                i_err: 0.0,
-                d_err: 0.0,
-                last_err: 0.0,
-            }
-        }
-
-        pub fn set_kp(&mut self, kp: f32) {
-            self.kp = kp;
-        }
-
-        pub fn set_ki(&mut self, ki: f32) {
-            self.ki = ki;
-        }
-
-        pub fn set_kd(&mut self, kd: f32) {
-            self.kd = kd;
-        }
-
-        pub fn set_gains(&mut self, kp: f32, ki: f32, kd: f32) {
-            self.kp = kp;
-            self.ki = ki;
-            self.kd = kd;
-        }
-
-        pub fn compute(&mut self, target: f32, current: f32) -> f32 {
-            self.target = target;
-            self.err = self.target - current;
-            self.d_err = self.err - self.last_err;
-
-            // only accumulate integral error when error is small
-            if self.err < 20.0 {
-                self.i_err = self.i_err + self.err;
-            } else {
-                self.i_err = 0.0;
-            }
-
-            let u = self.kp * self.err + self.ki * self.i_err + self.kd * self.d_err;
-            self.last_err = self.err; // set last error
-            u
-        }
+        FreeRtos::delay_ms(5000);
     }
 }
+
+// mod control {
+//     #![allow(dead_code)]
+//     pub struct PidController {
+//         target: f32,
+//         kp: f32,
+//         ki: f32,
+//         kd: f32,
+//         err: f32,
+//         i_err: f32,
+//         d_err: f32,
+//         last_err: f32,
+//     }
+//
+//     impl PidController {
+//         pub fn new(kp: f32, ki: f32, kd: f32) -> Self {
+//             PidController {
+//                 target: 0.0,
+//                 kp,
+//                 ki,
+//                 kd,
+//                 err: 0.0,
+//                 i_err: 0.0,
+//                 d_err: 0.0,
+//                 last_err: 0.0,
+//             }
+//         }
+//
+//         pub fn set_kp(&mut self, kp: f32) {
+//             self.kp = kp;
+//         }
+//
+//         pub fn set_ki(&mut self, ki: f32) {
+//             self.ki = ki;
+//         }
+//
+//         pub fn set_kd(&mut self, kd: f32) {
+//             self.kd = kd;
+//         }
+//
+//         pub fn set_gains(&mut self, kp: f32, ki: f32, kd: f32) {
+//             self.kp = kp;
+//             self.ki = ki;
+//             self.kd = kd;
+//         }
+//
+//         pub fn compute(&mut self, target: f32, current: f32) -> f32 {
+//             self.target = target;
+//             self.err = self.target - current;
+//             self.d_err = self.err - self.last_err;
+//
+//             // only accumulate integral error when error is small
+//             if self.err < 20.0 {
+//                 self.i_err = self.i_err + self.err;
+//             } else {
+//                 self.i_err = 0.0;
+//             }
+//
+//             let u = self.kp * self.err + self.ki * self.i_err + self.kd * self.d_err;
+//             self.last_err = self.err; // set last error
+//             u
+//         }
+//     }
+// }
