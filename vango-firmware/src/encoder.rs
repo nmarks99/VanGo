@@ -25,6 +25,7 @@ pub const TICKS_TO_RPM: f32 =
     60.0 * 1000.0 / (COUNTS_PER_REV * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
 pub const TICKS_TO_RAD_PER_SEC: f32 =
     pi * 1000.0 / (COUNTS_PER_REV * GEAR_RATIO * ENCODER_RATE_MS * 4) as f32;
+pub const TICKS_PER_RAD: f32 = (7.0 * 50.0 * 4.0) / (2.0 * pi);
 
 pub struct Encoder<'d> {
     unit: PcntDriver<'d>,

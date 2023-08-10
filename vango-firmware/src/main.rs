@@ -1,6 +1,6 @@
 // basics
 use atomic_float::AtomicF32;
-use core::sync::atomic::{AtomicBool, AtomicI16, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicI16, AtomicI32, AtomicU16, Ordering};
 use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
@@ -32,7 +32,7 @@ mod encoder;
 mod neopixel;
 mod pen;
 use encoder::Encoder;
-use encoder::{ENCODER_RATE_MS, TICKS_TO_RPM};
+use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
 use neopixel::Neopixel;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
@@ -40,6 +40,15 @@ use vango_utils as utils;
 // Measured encoder counts and speeds set in timer interrupt
 static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
 static RIGHT_COUNT: AtomicI32 = AtomicI32::new(0);
+static LEFT_SPEED: AtomicF32 = AtomicF32::new(0.0);
+static LEFT_ANGLE: AtomicF32 = AtomicF32::new(0.0);
+static RIGHT_ANGLE: AtomicF32 = AtomicF32::new(0.0);
+static RIGHT_SPEED: AtomicF32 = AtomicF32::new(0.0);
+static TARGET: AtomicF32 = AtomicF32::new(0.0);
+static LEFT_DUTY: AtomicF32 = AtomicF32::new(0.0);
+static RIGHT_DUTY: AtomicF32 = AtomicF32::new(0.0);
+static PRINT_LIMITER: AtomicU16 = AtomicU16::new(0);
+
 static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
 static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 
@@ -47,7 +56,7 @@ static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
 static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
-static KP: AtomicF32 = AtomicF32::new(1.0);
+static KP: AtomicF32 = AtomicF32::new(0.1);
 static KI: AtomicF32 = AtomicF32::new(0.0);
 static KD: AtomicF32 = AtomicF32::new(0.0);
 
@@ -236,9 +245,10 @@ fn main() -> anyhow::Result<()> {
 
     // Sets motor direction
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
-    left_direction.set_low()?;
+    left_direction.set_high()?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
     right_direction.set_low()?;
+    let max_duty = right_pwm_driver.get_max_duty();
 
     // set up encoder for each motor
     let left_encoder = Encoder::new(
@@ -257,24 +267,90 @@ fn main() -> anyhow::Result<()> {
     let monitor = FreeRtosMonitor::new();
     let monitor_notify = monitor.notifier();
 
+    log::info!("ticks_per_rad = {}", TICKS_PER_RAD);
+    log::info!("encoder rate ms = {}", ENCODER_RATE_MS);
+    log::info!(
+        "Encoder zero = {},{}",
+        left_encoder.get_value().unwrap() as i32,
+        right_encoder.get_value().unwrap()
+    );
+    FreeRtos::delay_ms(3000);
+
     // Timer based ISR
     let task_timer = task_timer
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
 
-            // Get left counts and RPM
-            let count1 = left_encoder.get_value().unwrap() as i32;
-            let last_count1 = LEFT_COUNT.load(Ordering::SeqCst) as i32;
-            let left_speed: f32 = (count1 - last_count1).abs() as f32 * TICKS_TO_RPM;
-            LEFT_RPM.store(left_speed as i16, Ordering::SeqCst);
-            LEFT_COUNT.store(count1, Ordering::SeqCst);
+            // Read encoder, compute angle and store it
+            let left_count = left_encoder.get_value().unwrap() as i32;
+            let left_angle = left_count as f32 * TICKS_PER_RAD;
+            LEFT_ANGLE.store(left_angle, Ordering::SeqCst);
+            let right_count = right_encoder.get_value().unwrap() as i32;
+            let right_angle = right_count as f32 * TICKS_PER_RAD;
+            RIGHT_ANGLE.store(right_angle, Ordering::SeqCst);
 
-            // Get right counts and RPM
-            let count2 = right_encoder.get_value().unwrap() as i32;
-            let last_count2 = RIGHT_COUNT.load(Ordering::SeqCst) as i32;
-            let right_speed: f32 = (count2 - last_count2).abs() as f32 * TICKS_TO_RPM;
-            RIGHT_RPM.store(right_speed as i16, Ordering::SeqCst);
-            RIGHT_COUNT.store(count2, Ordering::SeqCst);
+            // Load last count, compute speed, store it
+            let left_count_last = LEFT_COUNT.load(Ordering::SeqCst);
+            let left_speed = (left_count as f32 - left_count_last as f32)
+                / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
+            LEFT_SPEED.store(left_speed, Ordering::SeqCst);
+            let right_count_last = RIGHT_COUNT.load(Ordering::SeqCst);
+            let right_speed = (right_count as f32 - right_count_last as f32)
+                / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
+            RIGHT_SPEED.store(right_speed, Ordering::SeqCst);
+
+            // Store current count
+            LEFT_COUNT.store(left_count, Ordering::SeqCst);
+            RIGHT_COUNT.store(right_count, Ordering::SeqCst);
+
+            // load the target speed and compute error
+            let target_speed = TARGET.load(Ordering::SeqCst);
+            let err_left = target_speed - left_speed;
+            let err_right = target_speed - right_speed;
+
+            // Compute the control signal (PID controller)
+            let u_left = KP.load(Ordering::SeqCst) * err_left;
+            let u_right = KP.load(Ordering::SeqCst) * err_right;
+
+            // load the last duty cycle value and compute new duty cycle
+            let mut left_duty = LEFT_DUTY.load(Ordering::SeqCst);
+            left_duty = left_duty + u_left;
+            if left_duty > max_duty as f32 {
+                left_duty = max_duty as f32;
+            } else if left_duty < 0.0 {
+                left_duty = 0.0;
+            }
+            let mut right_duty = RIGHT_DUTY.load(Ordering::SeqCst);
+            right_duty = right_duty + u_right;
+            if right_duty > max_duty as f32 {
+                right_duty = max_duty as f32;
+            } else if right_duty < 0.0 {
+                right_duty = 0.0;
+            }
+
+            LEFT_DUTY.store(left_duty, Ordering::SeqCst);
+            RIGHT_DUTY.store(right_duty, Ordering::SeqCst);
+
+            // Set the motor to this duty cycle
+            let _ = left_pwm_driver.set_duty(left_duty as u32);
+            let _ = right_pwm_driver.set_duty(right_duty as u32);
+
+            let mut c = PRINT_LIMITER.load(Ordering::Relaxed);
+            if c > 10 {
+                println!("===================================");
+                println!("Error: {}, {}", err_left, err_right);
+                println!("Speed: {}, {}", left_speed, right_speed);
+                println!("Count: {}, {}", left_count, right_count);
+                println!(
+                    "Angle: {}, {}",
+                    left_angle * 180.0 / 3.1415,
+                    right_angle * 180.0 / 3.1415
+                );
+                c = 0;
+            } else {
+                c += 1;
+            }
+            PRINT_LIMITER.store(c, Ordering::Relaxed);
         })
         .unwrap();
 
@@ -282,80 +358,90 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
-    use control::PidController;
-    let mut left_pid = PidController::new(0.0, 0.0, 0.0);
-    let mut right_pid = PidController::new(0.0, 0.0, 0.0);
+    // use control::PidController;
+    // let mut left_pid = PidController::new(0.0, 0.0, 0.0);
+    // let mut right_pid = PidController::new(0.0, 0.0, 0.0);
 
-    let mut count = 0;
     loop {
-        // Set gains again since they can be adjusted by the client
-        let kp = KP.load(Ordering::Relaxed);
-        let ki = KI.load(Ordering::Relaxed);
-        let kd = KD.load(Ordering::Relaxed);
-        left_pid.set_gains(kp, ki, kd);
-        right_pid.set_gains(kp, ki, kd);
+        TARGET.store(0.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
 
-        // Get target speeds which are set in BLE callback
-        let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
-        let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
+        TARGET.store(9.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
 
-        // Get the RPM of each motor
-        let left_speed = LEFT_RPM.load(Ordering::SeqCst);
-        let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
-
-        // Compute control signal to send from PID controller
-        let u_left = left_pid.compute(target_left as f32, left_speed as f32);
-        let u_right = right_pid.compute(target_right as f32, right_speed as f32);
-
-        // Set direction based on sign of control signal
-        let left_dir = if u_left < 0.0 {
-            Level::High
-        } else {
-            Level::Low
-        };
-        let right_dir = if u_right > 0.0 {
-            Level::High
-        } else {
-            Level::Low
-        };
-        left_direction.set_level(left_dir)?;
-        right_direction.set_level(right_dir)?;
-
-        // Set duty cycle for each motor
-        left_pwm_driver.set_duty(u_left.abs() as u32)?;
-        right_pwm_driver.set_duty(u_right.abs() as u32)?;
-
-        println!(
-            "{},{},{},{},{},{}",
-            left_speed,
-            right_speed,
-            u_left,
-            u_right,
-            u_left.abs(),
-            u_right.abs()
-        );
-        // if count == 10 {
-        //     log::info!("Gains = {},{},{}", kp, ki, kd);
-        //     log::info!(
-        //         "Left:\nCurrent = {}\nTarget={}\nu={}\n\n",
-        //         left_speed,
-        //         target_left,
-        //         u_left
-        //     );
-        //     log::info!(
-        //         "Right:\nCurrent = {}\nTarget={}\nu={}\n",
-        //         right_speed,
-        //         target_right,
-        //         u_right
-        //     );
-        //     println!("==============================");
-        //     count = 0
-        // } else {
-        //     count += 1;
-        // }
-
-        FreeRtos::delay_ms(1);
+        TARGET.store(20.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
     }
+    // let mut count = 0;
+    // loop {
+    //     // Set gains again since they can be adjusted by the client
+    //     let kp = KP.load(Ordering::Relaxed);
+    //     let ki = KI.load(Ordering::Relaxed);
+    //     let kd = KD.load(Ordering::Relaxed);
+    //     left_pid.set_gains(kp, ki, kd);
+    //     right_pid.set_gains(kp, ki, kd);
+    //
+    //     // Get target speeds which are set in BLE callback
+    //     let target_left = TARGET_RPM_LEFT.load(Ordering::SeqCst);
+    //     let target_right = TARGET_RPM_RIGHT.load(Ordering::SeqCst);
+    //
+    //     // Get the RPM of each motor
+    //     let left_speed = LEFT_RPM.load(Ordering::SeqCst);
+    //     let right_speed = RIGHT_RPM.load(Ordering::SeqCst);
+    //
+    //     // Compute control signal to send from PID controller
+    //     let u_left = left_pid.compute(target_left as f32, left_speed as f32);
+    //     let u_right = right_pid.compute(target_right as f32, right_speed as f32);
+    //
+    //     // Set direction based on sign of control signal
+    //     let left_dir = if u_left < 0.0 {
+    //         Level::High
+    //     } else {
+    //         Level::Low
+    //     };
+    //     let right_dir = if u_right > 0.0 {
+    //         Level::High
+    //     } else {
+    //         Level::Low
+    //     };
+    //     left_direction.set_level(left_dir)?;
+    //     right_direction.set_level(right_dir)?;
+    //
+    //     // Set duty cycle for each motor
+    //     left_pwm_driver.set_duty(u_left.abs() as u32)?;
+    //     right_pwm_driver.set_duty(u_right.abs() as u32)?;
+    //
+    //     println!(
+    //         "{},{},{},{},{},{}",
+    //         left_speed,
+    //         right_speed,
+    //         u_left,
+    //         u_right,
+    //         u_left.abs(),
+    //         u_right.abs()
+    //     );
+    //     // if count == 10 {
+    //     //     log::info!("Gains = {},{},{}", kp, ki, kd);
+    //     //     log::info!(
+    //     //         "Left:\nCurrent = {}\nTarget={}\nu={}\n\n",
+    //     //         left_speed,
+    //     //         target_left,
+    //     //         u_left
+    //     //     );
+    //     //     log::info!(
+    //     //         "Right:\nCurrent = {}\nTarget={}\nu={}\n",
+    //     //         right_speed,
+    //     //         target_right,
+    //     //         u_right
+    //     //     );
+    //     //     println!("==============================");
+    //     //     count = 0
+    //     // } else {
+    //     //     count += 1;
+    //     // }
+    //
+    //     FreeRtos::delay_ms(1);
+    // }
 }
 
 mod control {
@@ -416,6 +502,7 @@ mod control {
             }
 
             let u = self.kp * self.err + self.ki * self.i_err + self.kd * self.d_err;
+            self.last_err = self.err; // set last error
             u
         }
     }
