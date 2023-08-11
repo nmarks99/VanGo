@@ -29,6 +29,7 @@ mod encoder;
 mod neopixel;
 mod pen;
 use diff_drive::ddrive::{DiffDrive, WheelState};
+use diff_drive::rigid2d::{Pose2D, Twist2D};
 use diff_drive::utils::{normalize_angle, rad2deg};
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
@@ -317,9 +318,10 @@ fn main() -> anyhow::Result<()> {
             RIGHT_COUNT.store(right_count, Ordering::SeqCst);
 
             // load the target speed and compute error
-            let target_speed = TARGET.load(Ordering::SeqCst);
-            let err_left = target_speed - left_speed;
-            let err_right = target_speed - right_speed;
+            let target_speed_left = TARGET_SPEED_LEFT.load(Ordering::SeqCst);
+            let target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
+            let err_left = target_speed_left - left_speed;
+            let err_right = target_speed_right - right_speed;
 
             // Compute the control signal (PID controller)
             let u_left = KP.load(Ordering::SeqCst) * err_left;
@@ -354,8 +356,8 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
-    TARGET.store(std::f32::consts::PI, Ordering::Relaxed);
-    let robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let mut pose = Pose2D::new(0.0, 0.0, 0.0);
     let mut wheel_speeds = WheelState::new(
         LEFT_SPEED.load(Ordering::Relaxed),
         RIGHT_SPEED.load(Ordering::Relaxed),
@@ -364,6 +366,13 @@ fn main() -> anyhow::Result<()> {
         LEFT_ANGLE.load(Ordering::Relaxed),
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
+
+    // drive in a circle of radius 0.2m with linear velocity 0.1m/s
+    //
+    let twist = Twist2D::new(0.2 / 0.2, 0.2, 0.0);
+    let target_speeds = robot.speeds_from_twist(twist);
+    TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
+    TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
     let mut count = 0;
     loop {
@@ -374,6 +383,7 @@ fn main() -> anyhow::Result<()> {
             wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
             wheel_angles.left = rad2deg(normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed)));
             wheel_angles.right = rad2deg(normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed)));
+            pose = robot.forward_kinematics(pose, wheel_angles);
 
             // Compute the twist
             let twist = robot.twist_from_speeds(wheel_speeds);
@@ -382,6 +392,7 @@ fn main() -> anyhow::Result<()> {
                 println!("Speeds = {} rpm", wheel_speeds.convert_to_rpm());
                 println!("Angles = {} deg", wheel_angles);
                 println!("Twist (theta,x,y) = {}", twist);
+                println!("Pose = {}", pose);
                 println!("-----------------------------------------");
                 count = 0;
             } else {
