@@ -296,10 +296,10 @@ fn main() -> anyhow::Result<()> {
 
             // Read encoder, compute angle and store it
             let left_count = left_encoder.get_value().unwrap() as i32;
-            let left_angle = left_count as f32 * TICKS_PER_RAD;
+            let left_angle = left_count as f32 / TICKS_PER_RAD;
             LEFT_ANGLE.store(left_angle, Ordering::SeqCst);
             let right_count = right_encoder.get_value().unwrap() as i32;
-            let right_angle = right_count as f32 * TICKS_PER_RAD;
+            let right_angle = right_count as f32 / TICKS_PER_RAD;
             RIGHT_ANGLE.store(right_angle, Ordering::SeqCst);
 
             // Load last count, compute speed, store it
@@ -371,7 +371,7 @@ fn main() -> anyhow::Result<()> {
         if isr_flag {
             // Get current wheel speeds and angles
             wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
-            wheel_speeds.right = LEFT_SPEED.load(Ordering::Relaxed);
+            wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
             wheel_angles.left = rad2deg(normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed)));
             wheel_angles.right = rad2deg(normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed)));
 
