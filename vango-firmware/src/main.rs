@@ -47,21 +47,12 @@ static RIGHT_SPEED: AtomicF32 = AtomicF32::new(0.0);
 static LEFT_DUTY: AtomicF32 = AtomicF32::new(0.0);
 static RIGHT_DUTY: AtomicF32 = AtomicF32::new(0.0);
 static ISR_FLAG: AtomicBool = AtomicBool::new(false);
-
-static TARGET: AtomicF32 = AtomicF32::new(0.0);
 static TARGET_SPEED_LEFT: AtomicF32 = AtomicF32::new(0.0);
 static TARGET_SPEED_RIGHT: AtomicF32 = AtomicF32::new(0.0);
 
-// static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
-// static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
-
-// Target speeds set by BLE callbacks
-// static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
-// static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
-
-static KP: AtomicF32 = AtomicF32::new(0.3);
-static KI: AtomicF32 = AtomicF32::new(0.0);
-static KD: AtomicF32 = AtomicF32::new(0.0);
+const KP: f32 = 0.3;
+// static KI: AtomicF32 = AtomicF32::new(0.0);
+// static KD: AtomicF32 = AtomicF32::new(0.0);
 
 // BLE UUIDs
 const VANGO_SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
@@ -70,7 +61,7 @@ const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002
 const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
 const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
-const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
+// const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045; // meters
@@ -85,7 +76,7 @@ fn main() -> anyhow::Result<()> {
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
-    neo.set_color("blue", 0.2)?;
+    neo.set_color("green", 0.2)?;
 
     // Setup BLE server
     let ble_device = BLEDevice::take();
@@ -106,60 +97,6 @@ fn main() -> anyhow::Result<()> {
     waypoint_blec.lock().on_write(move |recv| {
         let waypoint_bytes = recv.recv_data;
         log::info!("Waypoint: {:?}", waypoint_bytes);
-    });
-
-    let pid_blec = ble_service
-        .lock()
-        .create_characteristic(PID_UUID, NimbleProperties::WRITE | NimbleProperties::READ);
-    pid_blec.lock().on_write(move |recv| {
-        log::info!("Tuning characteristic-> got: {:?}", recv.recv_data);
-        if recv.recv_data.len() == 3 {
-            let perc: Option<f32> = match recv.recv_data[2] {
-                b'1' => Some(0.05),
-                b'2' => Some(0.1),
-                b'3' => Some(0.2),
-                b'4' => Some(0.5),
-                b'5' => Some(1.0),
-                b'6' => Some(10.0),
-                _ => None,
-            };
-
-            if perc.is_some() {
-                let mut kp: f32 = KP.load(Ordering::Relaxed);
-                let mut ki: f32 = KI.load(Ordering::Relaxed);
-                let mut kd: f32 = KD.load(Ordering::Relaxed);
-                match recv.recv_data[0] {
-                    b'P' => match recv.recv_data[1] {
-                        b'+' => kp = kp + kp * perc.unwrap(),
-                        b'-' => kp = kp - kp * perc.unwrap(),
-                        _ => {
-                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
-                        }
-                    },
-                    b'I' => match recv.recv_data[1] {
-                        b'+' => ki = ki + ki * perc.unwrap(),
-                        b'-' => ki = ki - ki * perc.unwrap(),
-                        _ => {
-                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
-                        }
-                    },
-                    b'D' => match recv.recv_data[1] {
-                        b'+' => kd = kd + kd * perc.unwrap(),
-                        b'-' => kd = kd - kd * perc.unwrap(),
-                        _ => {
-                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
-                        }
-                    },
-                    _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data),
-                }
-                log::info!("Storing {},{},{}", kp, ki, kd);
-                KP.store(kp, Ordering::Relaxed);
-                KI.store(ki, Ordering::Relaxed);
-                KD.store(kd, Ordering::Relaxed);
-            }
-        } else {
-            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data);
-        }
     });
 
     // BLE characteristic for left motor speed
@@ -324,8 +261,8 @@ fn main() -> anyhow::Result<()> {
             let err_right = target_speed_right - right_speed;
 
             // Compute the control signal (PID controller)
-            let u_left = KP.load(Ordering::SeqCst) * err_left;
-            let u_right = KP.load(Ordering::SeqCst) * err_right;
+            let u_left = KP * err_left;
+            let u_right = KP * err_right;
 
             // load the last duty cycle value and compute new duty cycle
             let mut left_duty = LEFT_DUTY.load(Ordering::SeqCst);
@@ -368,8 +305,9 @@ fn main() -> anyhow::Result<()> {
     );
 
     // drive in a circle of radius 0.2m with linear velocity 0.1m/s
-    //
-    let twist = Twist2D::new(0.2 / 0.2, 0.2, 0.0);
+    const circle_radius: f32 = 0.1;
+    const linear_velocity: f32 = 0.3;
+    let twist = Twist2D::new(linear_velocity / circle_radius, linear_velocity, 0.0);
     let target_speeds = robot.speeds_from_twist(twist);
     TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
