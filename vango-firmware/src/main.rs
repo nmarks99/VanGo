@@ -1,16 +1,13 @@
 // basics
 use atomic_float::AtomicF32;
-use core::sync::atomic::{AtomicI16, AtomicI32, AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use core::time::Duration;
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
 use esp_idf_sys as _;
 
-// use diff_drive::rigid2d::Vector2D;
-
 // GPIO
-use esp_idf_hal::gpio::Level;
 use esp_idf_hal::gpio::PinDriver;
 
 // LEDC (PWM)
@@ -31,6 +28,8 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 mod encoder;
 mod neopixel;
 mod pen;
+use diff_drive::ddrive::{DiffDrive, WheelState};
+use diff_drive::utils::{normalize_angle, rad2deg};
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
 use neopixel::Neopixel;
@@ -44,17 +43,20 @@ static LEFT_SPEED: AtomicF32 = AtomicF32::new(0.0);
 static LEFT_ANGLE: AtomicF32 = AtomicF32::new(0.0);
 static RIGHT_ANGLE: AtomicF32 = AtomicF32::new(0.0);
 static RIGHT_SPEED: AtomicF32 = AtomicF32::new(0.0);
-static TARGET: AtomicF32 = AtomicF32::new(0.0);
 static LEFT_DUTY: AtomicF32 = AtomicF32::new(0.0);
 static RIGHT_DUTY: AtomicF32 = AtomicF32::new(0.0);
-static PRINT_LIMITER: AtomicU16 = AtomicU16::new(0);
+static ISR_FLAG: AtomicBool = AtomicBool::new(false);
 
-static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
-static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
+static TARGET: AtomicF32 = AtomicF32::new(0.0);
+static TARGET_SPEED_LEFT: AtomicF32 = AtomicF32::new(0.0);
+static TARGET_SPEED_RIGHT: AtomicF32 = AtomicF32::new(0.0);
+
+// static LEFT_RPM: AtomicI16 = AtomicI16::new(0);
+// static RIGHT_RPM: AtomicI16 = AtomicI16::new(0);
 
 // Target speeds set by BLE callbacks
-static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
-static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
+// static TARGET_RPM_LEFT: AtomicI16 = AtomicI16::new(0);
+// static TARGET_RPM_RIGHT: AtomicI16 = AtomicI16::new(0);
 
 static KP: AtomicF32 = AtomicF32::new(0.3);
 static KI: AtomicF32 = AtomicF32::new(0.0);
@@ -68,6 +70,10 @@ const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002
 const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
+
+// Robot paramaters
+const WHEEL_RADIUS: f32 = 0.045; // meters
+const WHEEL_SEPARATION: f32 = 0.103; // meters
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -96,18 +102,18 @@ fn main() -> anyhow::Result<()> {
     let waypoint_blec = ble_service
         .lock()
         .create_characteristic(WAYPOINT_UUID, NimbleProperties::WRITE);
-    waypoint_blec.lock().on_write(move |recv, _param| {
-        let waypoint_bytes = recv;
+    waypoint_blec.lock().on_write(move |recv| {
+        let waypoint_bytes = recv.recv_data;
         log::info!("Waypoint: {:?}", waypoint_bytes);
     });
 
     let pid_blec = ble_service
         .lock()
         .create_characteristic(PID_UUID, NimbleProperties::WRITE | NimbleProperties::READ);
-    pid_blec.lock().on_write(move |recv, _param| {
-        log::info!("Tuning characteristic-> got: {:?}", recv);
-        if recv.len() == 3 {
-            let perc: Option<f32> = match recv[2] {
+    pid_blec.lock().on_write(move |recv| {
+        log::info!("Tuning characteristic-> got: {:?}", recv.recv_data);
+        if recv.recv_data.len() == 3 {
+            let perc: Option<f32> = match recv.recv_data[2] {
                 b'1' => Some(0.05),
                 b'2' => Some(0.1),
                 b'3' => Some(0.2),
@@ -121,23 +127,29 @@ fn main() -> anyhow::Result<()> {
                 let mut kp: f32 = KP.load(Ordering::Relaxed);
                 let mut ki: f32 = KI.load(Ordering::Relaxed);
                 let mut kd: f32 = KD.load(Ordering::Relaxed);
-                match recv[0] {
-                    b'P' => match recv[1] {
+                match recv.recv_data[0] {
+                    b'P' => match recv.recv_data[1] {
                         b'+' => kp = kp + kp * perc.unwrap(),
                         b'-' => kp = kp - kp * perc.unwrap(),
-                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                        _ => {
+                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
+                        }
                     },
-                    b'I' => match recv[1] {
+                    b'I' => match recv.recv_data[1] {
                         b'+' => ki = ki + ki * perc.unwrap(),
                         b'-' => ki = ki - ki * perc.unwrap(),
-                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                        _ => {
+                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
+                        }
                     },
-                    b'D' => match recv[1] {
+                    b'D' => match recv.recv_data[1] {
                         b'+' => kd = kd + kd * perc.unwrap(),
                         b'-' => kd = kd - kd * perc.unwrap(),
-                        _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                        _ => {
+                            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data)
+                        }
                     },
-                    _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv),
+                    _ => log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data),
                 }
                 log::info!("Storing {},{},{}", kp, ki, kd);
                 KP.store(kp, Ordering::Relaxed);
@@ -145,7 +157,7 @@ fn main() -> anyhow::Result<()> {
                 KD.store(kd, Ordering::Relaxed);
             }
         } else {
-            log::warn!("Recieved invalid PID tuning command: {:?}", recv);
+            log::warn!("Recieved invalid PID tuning command: {:?}", recv.recv_data);
         }
     });
 
@@ -157,14 +169,16 @@ fn main() -> anyhow::Result<()> {
     left_speed_blec
         .lock()
         .on_read(move |v, _| {
-            let speed = LEFT_RPM.load(Ordering::Relaxed);
-            v.set_value(&utils::int_to_bytes(speed));
+            // let speed = LEFT_RPM.load(Ordering::Relaxed);
+            let speed = LEFT_SPEED.load(Ordering::Relaxed);
+            // v.set_value(&utils::int_to_bytes(speed));
+            v.set_value(&utils::int_to_bytes(0));
             log::info!("Left speed = {:?}", speed);
         })
-        .on_write(move |recv, _param| {
-            let rpm_target_recv: i16 = utils::bytes_to_int(recv).unwrap();
+        .on_write(move |recv| {
+            let rpm_target_recv: i16 = utils::bytes_to_int(recv.recv_data).unwrap();
             log::info!("Left speed target {:?}", rpm_target_recv);
-            TARGET_RPM_LEFT.store(rpm_target_recv, Ordering::SeqCst);
+            TARGET_SPEED_LEFT.store(rpm_target_recv as f32, Ordering::SeqCst);
         });
 
     // BLE characteristic for right motor speed
@@ -175,14 +189,16 @@ fn main() -> anyhow::Result<()> {
     right_speed_blec
         .lock()
         .on_read(move |v, _| {
-            let speed = RIGHT_RPM.load(Ordering::Relaxed);
-            v.set_value(&utils::int_to_bytes(speed));
+            // let speed = RIGHT_RPM.load(Ordering::Relaxed);
+            let speed = RIGHT_SPEED.load(Ordering::Relaxed);
+            // v.set_value(&utils::int_to_bytes(speed));
+            v.set_value(&utils::int_to_bytes(0));
             log::info!("Right speed = {:?}", speed);
         })
-        .on_write(move |recv, _param| {
-            let rpm_target_recv: i16 = utils::bytes_to_int(recv).unwrap();
+        .on_write(move |recv| {
+            let rpm_target_recv: i16 = utils::bytes_to_int(recv.recv_data).unwrap();
             log::info!("Right speed target {:?}", rpm_target_recv);
-            TARGET_RPM_RIGHT.store(rpm_target_recv, Ordering::SeqCst);
+            TARGET_SPEED_RIGHT.store(rpm_target_recv as f32, Ordering::SeqCst);
         });
 
     // BLE characteristics for reading right encoder counts
@@ -276,6 +292,7 @@ fn main() -> anyhow::Result<()> {
     let task_timer = task_timer
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
+            ISR_FLAG.store(true, Ordering::SeqCst);
 
             // Read encoder, compute angle and store it
             let left_count = left_encoder.get_value().unwrap() as i32;
@@ -330,16 +347,6 @@ fn main() -> anyhow::Result<()> {
             // Set the motor to this duty cycle
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
-
-            // print every 10th
-            let mut c = PRINT_LIMITER.load(Ordering::Relaxed);
-            if c > 10 {
-                println!("{}, {}", left_speed, right_speed);
-                c = 0;
-            } else {
-                c += 1;
-            }
-            PRINT_LIMITER.store(c, Ordering::Relaxed);
         })
         .unwrap();
 
@@ -347,78 +354,44 @@ fn main() -> anyhow::Result<()> {
         .every(Duration::from_millis(ENCODER_RATE_MS))
         .unwrap();
 
+    TARGET.store(std::f32::consts::PI, Ordering::Relaxed);
+    let robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let mut wheel_speeds = WheelState::new(
+        LEFT_SPEED.load(Ordering::Relaxed),
+        RIGHT_SPEED.load(Ordering::Relaxed),
+    );
+    let mut wheel_angles = WheelState::new(
+        LEFT_ANGLE.load(Ordering::Relaxed),
+        RIGHT_ANGLE.load(Ordering::Relaxed),
+    );
+
+    let mut count = 0;
     loop {
-        TARGET.store(0.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(5000);
+        let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+        if isr_flag {
+            // Get current wheel speeds and angles
+            wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
+            wheel_speeds.right = LEFT_SPEED.load(Ordering::Relaxed);
+            wheel_angles.left = rad2deg(normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed)));
+            wheel_angles.right = rad2deg(normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed)));
 
-        TARGET.store(10.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(5000);
+            // Compute the twist
+            let twist = robot.twist_from_speeds(wheel_speeds);
+            if count >= 5 {
+                println!("Speeds = {} rad/s", wheel_speeds);
+                println!("Speeds = {} rpm", wheel_speeds.convert_to_rpm());
+                println!("Angles = {} deg", wheel_angles);
+                println!("Twist (theta,x,y) = {}", twist);
+                println!("-----------------------------------------");
+                count = 0;
+            } else {
+                count += 1;
+            }
 
-        TARGET.store(20.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(5000);
+            // Unset the ISR flag
+            ISR_FLAG.store(false, Ordering::Relaxed);
+        } else {
+            FreeRtos::delay_ms(1);
+        }
     }
 }
-
-// mod control {
-//     #![allow(dead_code)]
-//     pub struct PidController {
-//         target: f32,
-//         kp: f32,
-//         ki: f32,
-//         kd: f32,
-//         err: f32,
-//         i_err: f32,
-//         d_err: f32,
-//         last_err: f32,
-//     }
-//
-//     impl PidController {
-//         pub fn new(kp: f32, ki: f32, kd: f32) -> Self {
-//             PidController {
-//                 target: 0.0,
-//                 kp,
-//                 ki,
-//                 kd,
-//                 err: 0.0,
-//                 i_err: 0.0,
-//                 d_err: 0.0,
-//                 last_err: 0.0,
-//             }
-//         }
-//
-//         pub fn set_kp(&mut self, kp: f32) {
-//             self.kp = kp;
-//         }
-//
-//         pub fn set_ki(&mut self, ki: f32) {
-//             self.ki = ki;
-//         }
-//
-//         pub fn set_kd(&mut self, kd: f32) {
-//             self.kd = kd;
-//         }
-//
-//         pub fn set_gains(&mut self, kp: f32, ki: f32, kd: f32) {
-//             self.kp = kp;
-//             self.ki = ki;
-//             self.kd = kd;
-//         }
-//
-//         pub fn compute(&mut self, target: f32, current: f32) -> f32 {
-//             self.target = target;
-//             self.err = self.target - current;
-//             self.d_err = self.err - self.last_err;
-//
-//             // only accumulate integral error when error is small
-//             if self.err < 20.0 {
-//                 self.i_err = self.i_err + self.err;
-//             } else {
-//                 self.i_err = 0.0;
-//             }
-//
-//             let u = self.kp * self.err + self.ki * self.i_err + self.kd * self.d_err;
-//             self.last_err = self.err; // set last error
-//             u
-//         }
-//     }
-// }
