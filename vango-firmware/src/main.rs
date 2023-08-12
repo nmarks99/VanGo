@@ -194,10 +194,17 @@ fn main() -> anyhow::Result<()> {
     // )?;
 
     // Sets motor direction
+    let motor_direction: bool = true;
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
-    left_direction.set_high()?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
-    right_direction.set_low()?;
+    if motor_direction {
+        left_direction.set_low()?;
+        right_direction.set_high()?;
+    } else {
+        left_direction.set_high()?;
+        right_direction.set_low()?;
+    }
+
     let max_duty = right_pwm_driver.get_max_duty();
 
     // set up encoder for each motor
@@ -217,44 +224,37 @@ fn main() -> anyhow::Result<()> {
     let monitor = FreeRtosMonitor::new();
     let monitor_notify = monitor.notifier();
 
-    log::info!("ticks_per_rad = {}", TICKS_PER_RAD);
-    log::info!("encoder rate ms = {}", ENCODER_RATE_MS);
-    log::info!(
-        "Encoder zero = {},{}",
-        left_encoder.get_value().unwrap() as i32,
-        right_encoder.get_value().unwrap()
-    );
-    FreeRtos::delay_ms(3000);
-
     // Timer based ISR
     let task_timer = task_timer
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
             ISR_FLAG.store(true, Ordering::SeqCst);
 
-            // Read encoder, compute angle and store it
-            let left_count = left_encoder.get_value().unwrap() as i32;
+            // Get counts and fix angle
+            let mut left_count = -left_encoder.get_value().unwrap() as i32;
+            let mut right_count = -right_encoder.get_value().unwrap() as i32;
+
+            // Compute angles
             let left_angle = left_count as f32 / TICKS_PER_RAD;
-            LEFT_ANGLE.store(left_angle, Ordering::SeqCst);
-            let right_count = right_encoder.get_value().unwrap() as i32;
             let right_angle = right_count as f32 / TICKS_PER_RAD;
-            RIGHT_ANGLE.store(right_angle, Ordering::SeqCst);
 
-            // Load last count, compute speed, store it
+            // Compute speeds
             let left_count_last = LEFT_COUNT.load(Ordering::SeqCst);
-            let left_speed = (left_count as f32 - left_count_last as f32)
+            let mut left_speed = (left_count as f32 - left_count_last as f32)
                 / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
-            LEFT_SPEED.store(left_speed, Ordering::SeqCst);
             let right_count_last = RIGHT_COUNT.load(Ordering::SeqCst);
-            let right_speed = (right_count as f32 - right_count_last as f32)
+            let mut right_speed = (right_count as f32 - right_count_last as f32)
                 / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
-            RIGHT_SPEED.store(right_speed, Ordering::SeqCst);
 
-            // Store current count
+            // store all the values
             LEFT_COUNT.store(left_count, Ordering::SeqCst);
             RIGHT_COUNT.store(right_count, Ordering::SeqCst);
+            LEFT_ANGLE.store(left_angle, Ordering::SeqCst);
+            RIGHT_ANGLE.store(right_angle, Ordering::SeqCst);
+            LEFT_SPEED.store(left_speed, Ordering::SeqCst);
+            RIGHT_SPEED.store(right_speed, Ordering::SeqCst);
 
-            // load the target speed and compute error
+            // Load target speeds and compute error
             let target_speed_left = TARGET_SPEED_LEFT.load(Ordering::SeqCst);
             let target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
             let err_left = target_speed_left - left_speed;
@@ -295,6 +295,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
     let mut pose = Pose2D::new(0.0, 0.0, 0.0);
+    let mut twist = Twist2D::new(0.0, 0.0, 0.0);
     let mut wheel_speeds = WheelState::new(
         LEFT_SPEED.load(Ordering::Relaxed),
         RIGHT_SPEED.load(Ordering::Relaxed),
@@ -304,33 +305,32 @@ fn main() -> anyhow::Result<()> {
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
 
-    // drive in a circle of radius 0.2m with linear velocity 0.1m/s
-    const circle_radius: f32 = 0.1;
-    const linear_velocity: f32 = 0.3;
-    let twist = Twist2D::new(linear_velocity / circle_radius, linear_velocity, 0.0);
-    let target_speeds = robot.speeds_from_twist(twist);
+    let target_speeds = WheelState::new(12.0, 12.0);
     TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
     let mut count = 0;
     loop {
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+
         if isr_flag {
-            // Get current wheel speeds and angles
+            // Get current wheel speeds, angles, twist, and pose
             wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
             wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
-            wheel_angles.left = rad2deg(normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed)));
-            wheel_angles.right = rad2deg(normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed)));
-            pose = robot.forward_kinematics(pose, wheel_angles);
+            wheel_angles.left = normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed));
+            wheel_angles.right = normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed));
+            twist = robot.twist_from_speeds(wheel_speeds);
+            pose = robot.forward_kinematics(wheel_angles);
 
-            // Compute the twist
-            let twist = robot.twist_from_speeds(wheel_speeds);
             if count >= 5 {
+                println!(
+                    "Counts = {}, {}",
+                    LEFT_COUNT.load(Ordering::Relaxed),
+                    RIGHT_COUNT.load(Ordering::Relaxed)
+                );
                 println!("Speeds = {} rad/s", wheel_speeds);
-                println!("Speeds = {} rpm", wheel_speeds.convert_to_rpm());
-                println!("Angles = {} deg", wheel_angles);
                 println!("Twist (theta,x,y) = {}", twist);
-                println!("Pose = {}", pose);
+                println!("Pose = {}", pose); // not quite right
                 println!("-----------------------------------------");
                 count = 0;
             } else {
