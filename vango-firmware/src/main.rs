@@ -26,6 +26,7 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
 // local modules
 mod encoder;
+mod motor;
 mod neopixel;
 mod pen;
 use diff_drive::ddrive::{DiffDrive, WheelState};
@@ -33,6 +34,7 @@ use diff_drive::rigid2d::{Pose2D, Twist2D};
 use diff_drive::utils::{normalize_angle, rad2deg};
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
+use motor::MotorDirection;
 use neopixel::Neopixel;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
@@ -194,13 +196,13 @@ fn main() -> anyhow::Result<()> {
     // )?;
 
     // Sets motor direction
-    let motor_direction: bool = true;
+    let motor_direction = MotorDirection::Forward;
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
-    if motor_direction {
+    if motor_direction == MotorDirection::Forward {
         left_direction.set_low()?;
         right_direction.set_high()?;
-    } else {
+    } else if motor_direction == MotorDirection::Backward {
         left_direction.set_high()?;
         right_direction.set_low()?;
     }
