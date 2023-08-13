@@ -197,17 +197,11 @@ fn main() -> anyhow::Result<()> {
     //     peripherals.ledc.timer2,
     // )?;
 
-    // Set initial motor direction
-    let motor_direction = MotorDirection::Forward;
+    // Set initial motor direction, both forward
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
-    if motor_direction == MotorDirection::Forward {
-        left_direction.set_low()?;
-        right_direction.set_high()?;
-    } else if motor_direction == MotorDirection::Backward {
-        left_direction.set_high()?;
-        right_direction.set_low()?;
-    }
+    left_direction.set_low()?;
+    right_direction.set_high()?;
     let max_duty = right_pwm_driver.get_max_duty();
 
     // set up encoder for each motor
@@ -228,7 +222,6 @@ fn main() -> anyhow::Result<()> {
     let monitor_notify = monitor.notifier();
 
     // Timer based ISR
-    let mut cc = 0;
     let task_timer = task_timer
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
@@ -250,7 +243,7 @@ fn main() -> anyhow::Result<()> {
             let mut right_speed = (right_count as f32 - right_count_last as f32)
                 / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
 
-            // store all the values
+            // Store the counts, angles(rad), and speeds(rad/s)
             LEFT_COUNT.store(left_count, Ordering::SeqCst);
             RIGHT_COUNT.store(right_count, Ordering::SeqCst);
             LEFT_ANGLE.store(left_angle, Ordering::SeqCst);
@@ -268,32 +261,24 @@ fn main() -> anyhow::Result<()> {
             let mut u_left = KP * err_left;
             let mut u_right = KP * err_right;
 
-            // Handle negative target speeds
+            // Handle target speeds for both directions.
             let mut left_motor_dir: MotorDirection;
             let mut right_motor_dir: MotorDirection;
             if target_speed_left < 0.0 {
+                // Backward
                 u_left = -u_left;
-                left_motor_dir = MotorDirection::Backward;
+                let _ = left_direction.set_high();
             } else {
-                left_motor_dir = MotorDirection::Forward;
+                // Forward
+                let _ = left_direction.set_low();
             }
             if target_speed_right < 0.0 {
+                // Backward
                 u_right = -u_right;
-                right_motor_dir = MotorDirection::Backward;
-            } else {
-                right_motor_dir = MotorDirection::Forward;
-            }
-
-            // Set motor directions accordingly
-            if left_motor_dir == MotorDirection::Forward {
-                let _ = left_direction.set_low();
-            } else if left_motor_dir == MotorDirection::Backward {
-                let _ = left_direction.set_high();
-            }
-            if right_motor_dir == MotorDirection::Forward {
-                let _ = right_direction.set_high();
-            } else if right_motor_dir == MotorDirection::Backward {
                 let _ = right_direction.set_low();
+            } else {
+                // Forward
+                let _ = right_direction.set_high();
             }
 
             // load the last duty cycle value and compute new duty cycle
@@ -319,19 +304,7 @@ fn main() -> anyhow::Result<()> {
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
 
-            // if cc >= 10 {
-            //     println!("----------------------------------------");
-            //     println!("Counts = {}, {}", left_count, right_count);
-            //     println!("Angles = {}, {}", left_angle, right_angle);
-            //     println!("Speeds = {}, {}", left_speed, right_speed);
-            //     println!("Err = {}, {}", err_left, err_right);
-            //     println!("U = {}, {}", u_left, u_right);
-            //     println!("Duty = {}, {}", left_duty, right_duty);
-            //     println!("Dutyu32 = {}, {}", left_duty as u32, right_duty as u32);
-            //     cc = 0;
-            // } else {
-            //     cc += 1;
-            // }
+            println!("{},{}", left_speed, right_speed);
         })
         .unwrap();
 
@@ -351,7 +324,7 @@ fn main() -> anyhow::Result<()> {
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
 
-    let mut target_speeds = WheelState::new(12.0, -12.0);
+    let mut target_speeds = WheelState::new(0.0, 0.0);
     TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
@@ -359,39 +332,57 @@ fn main() -> anyhow::Result<()> {
     let t0 = SYS_TIMER.now().as_millis();
 
     loop {
-        let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
-        if isr_flag {
-            // Get current wheel speeds, angles, twist, and pose
-            wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
-            wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
-            wheel_angles.left = normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed));
-            wheel_angles.right = normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed));
-            twist = robot.twist_from_speeds(wheel_speeds);
-            pose = robot.forward_kinematics(wheel_angles);
-            let t = SYS_TIMER.now().as_millis() - t0;
+        TARGET_SPEED_LEFT.store(10.0, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(10.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
 
-            // Limit the printing rate
-            if count >= 5 {
-                // println!("Time: {} ms", t);
-                // println!(
-                //     "Counts = {}, {}",
-                //     LEFT_COUNT.load(Ordering::Relaxed),
-                //     RIGHT_COUNT.load(Ordering::Relaxed)
-                // );
-                // println!("Speeds = {} rad/s", wheel_speeds);
-                // println!("Angles = {} rad", wheel_angles);
-                // println!("Twist (theta,x,y) = {}", twist);
-                // println!("Pose = {}", pose); // not quite right
-                // println!("-----------------------------------------");
-                count = 0;
-            } else {
-                count += 1;
-            }
+        TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
 
-            // Unset the ISR flag
-            ISR_FLAG.store(false, Ordering::Relaxed);
-        } else {
-            FreeRtos::delay_ms(1);
-        }
+        TARGET_SPEED_LEFT.store(-10.0, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(-10.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
+
+        TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
+        FreeRtos::delay_ms(3000);
     }
+
+    // loop {
+    //     let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+    //     if isr_flag {
+    //         // Get current wheel speeds, angles, twist, and pose
+    //         wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
+    //         wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
+    //         wheel_angles.left = normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed));
+    //         wheel_angles.right = normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed));
+    //         twist = robot.twist_from_speeds(wheel_speeds);
+    //         pose = robot.forward_kinematics(wheel_angles);
+    //         let t = SYS_TIMER.now().as_millis() - t0;
+    //
+    //         // Limit the printing rate
+    //         if count >= 5 {
+    //             println!("Time: {} ms", t);
+    //             println!(
+    //                 "Counts = {}, {}",
+    //                 LEFT_COUNT.load(Ordering::Relaxed),
+    //                 RIGHT_COUNT.load(Ordering::Relaxed)
+    //             );
+    //             println!("Speeds = {} rad/s", wheel_speeds);
+    //             println!("Angles = {} rad", wheel_angles);
+    //             println!("Twist (theta,x,y) = {}", twist);
+    //             println!("Pose = {}", pose); // not quite right
+    //             println!("-----------------------------------------");
+    //             count = 0;
+    //         } else {
+    //             count += 1;
+    //         }
+    //
+    //         // Unset the ISR flag
+    //         ISR_FLAG.store(false, Ordering::Relaxed);
+    //     } else {
+    //         FreeRtos::delay_ms(1);
+    //     }
+    // }
 }
