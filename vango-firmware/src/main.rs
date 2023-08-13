@@ -17,8 +17,8 @@ use esp_idf_hal::ledc::LedcTimerDriver;
 
 // TIME
 use esp_idf_hal::task::executor::{FreeRtosMonitor, Monitor, Notify};
-// use esp_idf_svc::systime::EspSystemTime;
-// static SYS_TIMER: EspSystemTime = EspSystemTime {};
+use esp_idf_svc::systime::EspSystemTime;
+static SYS_TIMER: EspSystemTime = EspSystemTime {};
 
 // BLE
 use esp32_nimble::utilities::BleUuid;
@@ -310,6 +310,7 @@ fn main() -> anyhow::Result<()> {
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
     let mut count = 0;
+    let t0 = SYS_TIMER.now().as_millis();
     loop {
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
 
@@ -321,14 +322,18 @@ fn main() -> anyhow::Result<()> {
             wheel_angles.right = normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed));
             twist = robot.twist_from_speeds(wheel_speeds);
             pose = robot.forward_kinematics(wheel_angles);
+            let t = SYS_TIMER.now().as_millis() - t0;
 
+            // Limit the printing rate
             if count >= 5 {
+                println!("Time: {} ms", t);
                 println!(
                     "Counts = {}, {}",
                     LEFT_COUNT.load(Ordering::Relaxed),
                     RIGHT_COUNT.load(Ordering::Relaxed)
                 );
                 println!("Speeds = {} rad/s", wheel_speeds);
+                println!("Angles = {} rad", wheel_angles);
                 println!("Twist (theta,x,y) = {}", twist);
                 println!("Pose = {}", pose); // not quite right
                 println!("-----------------------------------------");
