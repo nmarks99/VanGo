@@ -197,8 +197,8 @@ fn main() -> anyhow::Result<()> {
     //     peripherals.ledc.timer2,
     // )?;
 
-    // Sets motor direction
-    let motor_direction = MotorDirection::Backward;
+    // Set initial motor direction
+    let motor_direction = MotorDirection::Forward;
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
     if motor_direction == MotorDirection::Forward {
@@ -267,9 +267,33 @@ fn main() -> anyhow::Result<()> {
             // Compute the control signal (PID controller)
             let mut u_left = KP * err_left;
             let mut u_right = KP * err_right;
-            if motor_direction == MotorDirection::Backward {
+
+            // Handle negative target speeds
+            let mut left_motor_dir: MotorDirection;
+            let mut right_motor_dir: MotorDirection;
+            if target_speed_left < 0.0 {
                 u_left = -u_left;
+                left_motor_dir = MotorDirection::Backward;
+            } else {
+                left_motor_dir = MotorDirection::Forward;
+            }
+            if target_speed_right < 0.0 {
                 u_right = -u_right;
+                right_motor_dir = MotorDirection::Backward;
+            } else {
+                right_motor_dir = MotorDirection::Forward;
+            }
+
+            // Set motor directions accordingly
+            if left_motor_dir == MotorDirection::Forward {
+                let _ = left_direction.set_low();
+            } else if left_motor_dir == MotorDirection::Backward {
+                let _ = left_direction.set_high();
+            }
+            if right_motor_dir == MotorDirection::Forward {
+                let _ = right_direction.set_high();
+            } else if right_motor_dir == MotorDirection::Backward {
+                let _ = right_direction.set_low();
             }
 
             // load the last duty cycle value and compute new duty cycle
@@ -295,19 +319,19 @@ fn main() -> anyhow::Result<()> {
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
 
-            if cc >= 10 {
-                println!("----------------------------------------");
-                println!("Counts = {}, {}", left_count, right_count);
-                println!("Angles = {}, {}", left_angle, right_angle);
-                println!("Speeds = {}, {}", left_speed, right_speed);
-                println!("Err = {}, {}", err_left, err_right);
-                println!("U = {}, {}", u_left, u_right);
-                println!("Duty = {}, {}", left_duty, right_duty);
-                println!("Dutyu32 = {}, {}", left_duty as u32, right_duty as u32);
-                cc = 0;
-            } else {
-                cc += 1;
-            }
+            // if cc >= 10 {
+            //     println!("----------------------------------------");
+            //     println!("Counts = {}, {}", left_count, right_count);
+            //     println!("Angles = {}, {}", left_angle, right_angle);
+            //     println!("Speeds = {}, {}", left_speed, right_speed);
+            //     println!("Err = {}, {}", err_left, err_right);
+            //     println!("U = {}, {}", u_left, u_right);
+            //     println!("Duty = {}, {}", left_duty, right_duty);
+            //     println!("Dutyu32 = {}, {}", left_duty as u32, right_duty as u32);
+            //     cc = 0;
+            // } else {
+            //     cc += 1;
+            // }
         })
         .unwrap();
 
@@ -327,7 +351,7 @@ fn main() -> anyhow::Result<()> {
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
 
-    let mut target_speeds = WheelState::new(-12.0, -12.0);
+    let mut target_speeds = WheelState::new(12.0, -12.0);
     TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
