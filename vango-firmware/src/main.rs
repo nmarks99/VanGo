@@ -24,14 +24,16 @@ static SYS_TIMER: EspSystemTime = EspSystemTime {};
 use esp32_nimble::utilities::BleUuid;
 use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
+// diff-drive
+use diff_drive::ddrive::{DiffDrive, WheelState};
+use diff_drive::rigid2d::{Pose2D, Twist2D};
+use diff_drive::utils::{normalize_angle, rad2deg};
+
 // local modules
 mod encoder;
 mod motor;
 mod neopixel;
 mod pen;
-use diff_drive::ddrive::{DiffDrive, WheelState};
-use diff_drive::rigid2d::{Pose2D, Twist2D};
-use diff_drive::utils::{normalize_angle, rad2deg};
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
 use motor::MotorDirection;
@@ -196,7 +198,7 @@ fn main() -> anyhow::Result<()> {
     // )?;
 
     // Sets motor direction
-    let motor_direction = MotorDirection::Forward;
+    let motor_direction = MotorDirection::Backward;
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
     let mut right_direction = PinDriver::output(peripherals.pins.gpio32)?;
     if motor_direction == MotorDirection::Forward {
@@ -206,7 +208,6 @@ fn main() -> anyhow::Result<()> {
         left_direction.set_high()?;
         right_direction.set_low()?;
     }
-
     let max_duty = right_pwm_driver.get_max_duty();
 
     // set up encoder for each motor
@@ -227,14 +228,15 @@ fn main() -> anyhow::Result<()> {
     let monitor_notify = monitor.notifier();
 
     // Timer based ISR
+    let mut cc = 0;
     let task_timer = task_timer
         .timer(move || {
             monitor_notify.notify(); // not sure what this does
             ISR_FLAG.store(true, Ordering::SeqCst);
 
             // Get counts and fix angle
-            let mut left_count = -left_encoder.get_value().unwrap() as i32;
-            let mut right_count = -right_encoder.get_value().unwrap() as i32;
+            let left_count = -left_encoder.get_value().unwrap() as i32;
+            let right_count = -right_encoder.get_value().unwrap() as i32;
 
             // Compute angles
             let left_angle = left_count as f32 / TICKS_PER_RAD;
@@ -257,24 +259,28 @@ fn main() -> anyhow::Result<()> {
             RIGHT_SPEED.store(right_speed, Ordering::SeqCst);
 
             // Load target speeds and compute error
-            let target_speed_left = TARGET_SPEED_LEFT.load(Ordering::SeqCst);
-            let target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
+            let mut target_speed_left = TARGET_SPEED_LEFT.load(Ordering::SeqCst);
+            let mut target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
             let err_left = target_speed_left - left_speed;
             let err_right = target_speed_right - right_speed;
 
             // Compute the control signal (PID controller)
-            let u_left = KP * err_left;
-            let u_right = KP * err_right;
+            let mut u_left = KP * err_left;
+            let mut u_right = KP * err_right;
+            if motor_direction == MotorDirection::Backward {
+                u_left = -u_left;
+                u_right = -u_right;
+            }
 
             // load the last duty cycle value and compute new duty cycle
             let mut left_duty = LEFT_DUTY.load(Ordering::SeqCst);
+            let mut right_duty = RIGHT_DUTY.load(Ordering::SeqCst);
             left_duty = left_duty + u_left;
             if left_duty > max_duty as f32 {
                 left_duty = max_duty as f32;
             } else if left_duty < 0.0 {
                 left_duty = 0.0;
             }
-            let mut right_duty = RIGHT_DUTY.load(Ordering::SeqCst);
             right_duty = right_duty + u_right;
             if right_duty > max_duty as f32 {
                 right_duty = max_duty as f32;
@@ -288,6 +294,20 @@ fn main() -> anyhow::Result<()> {
             // Set the motor to this duty cycle
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
+
+            if cc >= 10 {
+                println!("----------------------------------------");
+                println!("Counts = {}, {}", left_count, right_count);
+                println!("Angles = {}, {}", left_angle, right_angle);
+                println!("Speeds = {}, {}", left_speed, right_speed);
+                println!("Err = {}, {}", err_left, err_right);
+                println!("U = {}, {}", u_left, u_right);
+                println!("Duty = {}, {}", left_duty, right_duty);
+                println!("Dutyu32 = {}, {}", left_duty as u32, right_duty as u32);
+                cc = 0;
+            } else {
+                cc += 1;
+            }
         })
         .unwrap();
 
@@ -307,15 +327,15 @@ fn main() -> anyhow::Result<()> {
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
 
-    let target_speeds = WheelState::new(12.0, 12.0);
+    let mut target_speeds = WheelState::new(-12.0, -12.0);
     TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
     let mut count = 0;
     let t0 = SYS_TIMER.now().as_millis();
+
     loop {
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
-
         if isr_flag {
             // Get current wheel speeds, angles, twist, and pose
             wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
@@ -328,17 +348,17 @@ fn main() -> anyhow::Result<()> {
 
             // Limit the printing rate
             if count >= 5 {
-                println!("Time: {} ms", t);
-                println!(
-                    "Counts = {}, {}",
-                    LEFT_COUNT.load(Ordering::Relaxed),
-                    RIGHT_COUNT.load(Ordering::Relaxed)
-                );
-                println!("Speeds = {} rad/s", wheel_speeds);
-                println!("Angles = {} rad", wheel_angles);
-                println!("Twist (theta,x,y) = {}", twist);
-                println!("Pose = {}", pose); // not quite right
-                println!("-----------------------------------------");
+                // println!("Time: {} ms", t);
+                // println!(
+                //     "Counts = {}, {}",
+                //     LEFT_COUNT.load(Ordering::Relaxed),
+                //     RIGHT_COUNT.load(Ordering::Relaxed)
+                // );
+                // println!("Speeds = {} rad/s", wheel_speeds);
+                // println!("Angles = {} rad", wheel_angles);
+                // println!("Twist (theta,x,y) = {}", twist);
+                // println!("Pose = {}", pose); // not quite right
+                // println!("-----------------------------------------");
                 count = 0;
             } else {
                 count += 1;
