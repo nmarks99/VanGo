@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
-    neo.set_color("green", 0.2)?;
+    neo.set_color("white", 0.2)?;
 
     // Setup BLE server
     let ble_device = BLEDevice::take();
@@ -221,6 +221,12 @@ fn main() -> anyhow::Result<()> {
     let monitor = FreeRtosMonitor::new();
     let monitor_notify = monitor.notifier();
 
+    let mut left_speed_smooth = 0.0;
+    let mut right_speed_smooth = 0.0;
+    const ALPHA: f32 = 0.1;
+
+    let t0 = SYS_TIMER.now().as_millis();
+
     // Timer based ISR
     let task_timer = task_timer
         .timer(move || {
@@ -242,6 +248,18 @@ fn main() -> anyhow::Result<()> {
             let right_count_last = RIGHT_COUNT.load(Ordering::SeqCst);
             let mut right_speed = (right_count as f32 - right_count_last as f32)
                 / (TICKS_PER_RAD * ENCODER_RATE_MS as f32 / 1000.0);
+
+            // Low-pass filter the speed to remove high frequency noise
+            left_speed_smooth = ALPHA * left_speed + (1.0 - ALPHA) * left_speed_smooth;
+            right_speed_smooth = ALPHA * right_speed + (1.0 - ALPHA) * right_speed_smooth;
+            left_speed = left_speed_smooth;
+            right_speed = right_speed_smooth;
+            println!(
+                "{},{},{}",
+                SYS_TIMER.now().as_millis() - t0,
+                left_speed,
+                right_speed
+            );
 
             // Store the counts, angles(rad), and speeds(rad/s)
             LEFT_COUNT.store(left_count, Ordering::SeqCst);
@@ -303,8 +321,6 @@ fn main() -> anyhow::Result<()> {
             // Set the motor to this duty cycle
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
-
-            println!("{},{}", left_speed, right_speed);
         })
         .unwrap();
 
@@ -329,23 +345,22 @@ fn main() -> anyhow::Result<()> {
     TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
 
     let mut count = 0;
-    let t0 = SYS_TIMER.now().as_millis();
 
     loop {
         TARGET_SPEED_LEFT.store(10.0, Ordering::Relaxed);
         TARGET_SPEED_RIGHT.store(10.0, Ordering::Relaxed);
         FreeRtos::delay_ms(3000);
 
-        TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
+        TARGET_SPEED_LEFT.store(0.01, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(0.01, Ordering::Relaxed);
         FreeRtos::delay_ms(3000);
 
         TARGET_SPEED_LEFT.store(-10.0, Ordering::Relaxed);
         TARGET_SPEED_RIGHT.store(-10.0, Ordering::Relaxed);
         FreeRtos::delay_ms(3000);
 
-        TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
+        TARGET_SPEED_LEFT.store(-0.01, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(-0.01, Ordering::Relaxed);
         FreeRtos::delay_ms(3000);
     }
 
