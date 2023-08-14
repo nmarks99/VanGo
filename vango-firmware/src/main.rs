@@ -41,7 +41,7 @@ use neopixel::Neopixel;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
 
-// Measured encoder counts and speeds set in timer interrupt
+// Atomic variables set in timer ISR
 static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
 static RIGHT_COUNT: AtomicI32 = AtomicI32::new(0);
 static LEFT_SPEED: AtomicF32 = AtomicF32::new(0.0);
@@ -54,10 +54,6 @@ static ISR_FLAG: AtomicBool = AtomicBool::new(false);
 static TARGET_SPEED_LEFT: AtomicF32 = AtomicF32::new(0.0);
 static TARGET_SPEED_RIGHT: AtomicF32 = AtomicF32::new(0.0);
 
-const KP: f32 = 0.3;
-// static KI: AtomicF32 = AtomicF32::new(0.0);
-// static KD: AtomicF32 = AtomicF32::new(0.0);
-
 // BLE UUIDs
 const VANGO_SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
 const LEFT_SPEED_UUID: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
@@ -66,6 +62,10 @@ const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002
 const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 // const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
+
+// PD controller gains
+const KP: f32 = 0.3;
+const KD: f32 = 1.2;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045; // meters
@@ -224,6 +224,8 @@ fn main() -> anyhow::Result<()> {
     let mut left_speed_smooth = 0.0;
     let mut right_speed_smooth = 0.0;
     const ALPHA: f32 = 0.1;
+    let mut left_err_last = 0.0;
+    let mut right_err_last = 0.0;
 
     let t0 = SYS_TIMER.now().as_millis();
 
@@ -254,12 +256,6 @@ fn main() -> anyhow::Result<()> {
             right_speed_smooth = ALPHA * right_speed + (1.0 - ALPHA) * right_speed_smooth;
             left_speed = left_speed_smooth;
             right_speed = right_speed_smooth;
-            println!(
-                "{},{},{}",
-                SYS_TIMER.now().as_millis() - t0,
-                left_speed,
-                right_speed
-            );
 
             // Store the counts, angles(rad), and speeds(rad/s)
             LEFT_COUNT.store(left_count, Ordering::SeqCst);
@@ -275,9 +271,15 @@ fn main() -> anyhow::Result<()> {
             let err_left = target_speed_left - left_speed;
             let err_right = target_speed_right - right_speed;
 
+            let drv_err_left = err_left - left_err_last;
+            let drv_err_right = err_right - right_err_last;
+
             // Compute the control signal (PID controller)
-            let mut u_left = KP * err_left;
-            let mut u_right = KP * err_right;
+            let mut u_left = KP * err_left + KD * drv_err_left;
+            let mut u_right = KP * err_right + KD * drv_err_left;
+
+            left_err_last = err_left;
+            right_err_last = err_right;
 
             // Handle target speeds for both directions.
             let mut left_motor_dir: MotorDirection;
@@ -340,12 +342,7 @@ fn main() -> anyhow::Result<()> {
         RIGHT_ANGLE.load(Ordering::Relaxed),
     );
 
-    let mut target_speeds = WheelState::new(0.0, 0.0);
-    TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
-    TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
-
     let mut count = 0;
-
     loop {
         TARGET_SPEED_LEFT.store(10.0, Ordering::Relaxed);
         TARGET_SPEED_RIGHT.store(10.0, Ordering::Relaxed);
