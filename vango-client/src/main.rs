@@ -148,6 +148,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let pose_y_chr1 = pose_y_chr.clone();
         let pose_theta_chr1 = pose_theta_chr.clone();
         let task_handle = tokio::spawn(async move {
+            write!(
+                stdout,
+                "{}{}",
+                termion::clear::All,
+                termion::cursor::Goto(1, 1),
+            )
+            .unwrap();
             loop {
                 write!(
                     stdout,
@@ -162,12 +169,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     ascii_to_f32(pose_y_chr1.read().await.unwrap()).unwrap(),
                     ascii_to_f32(pose_theta_chr1.read().await.unwrap()).unwrap(),
                 );
-                print!("{}", pose);
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                print!("{}\n", pose);
+
+                // tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
-
-        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
 
         for c in stdin.keys() {
             // write!(
@@ -258,8 +264,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await
                 .expect("failed to set right speed");
 
-            stdout.flush().unwrap();
+            // stdout.flush().unwrap();
         }
+
+        let mut stdout = std::io::stdout().into_raw_mode().unwrap();
 
         // clear screen, move and show cursor at the end
         write!(

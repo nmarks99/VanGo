@@ -369,6 +369,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
     loop {
+        // If the values have been updated, compute the pose from odometry
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
         if isr_flag {
             let wheel_angles = WheelState::new(
