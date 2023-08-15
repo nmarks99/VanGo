@@ -73,6 +73,54 @@ pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
     num_bytes_vec
 }
 
+// Convert an f32 to its ASCII representation
+pub fn f32_to_ascii(value: f32) -> Vec<u8> {
+    let mut result = Vec::new();
+    let mut value_str = value.to_string();
+
+    if value < 0.0 {
+        result.push(b'-');
+        value_str = value_str[1..].to_string(); // Remove the negative sign from the string
+    }
+    result.extend(value_str.bytes());
+
+    result
+}
+
+/// Converts a Vec<u8> of ASCII characters to an f32
+pub fn ascii_to_f32(ascii_array: Vec<u8>) -> Result<f32, &'static str> {
+    let ascii_zero = b'0';
+    let ascii_decimal_point = b'.';
+
+    let mut value_str = String::new();
+    let mut has_decimal_point = false;
+
+    for &byte in &ascii_array {
+        if byte == ascii_decimal_point {
+            if has_decimal_point {
+                return Err("Multiple decimal points found");
+            }
+            has_decimal_point = true;
+            value_str.push('.');
+        } else if (byte >= ascii_zero) && (byte <= (ascii_zero + 9)) {
+            value_str.push((byte - ascii_zero + b'0') as char);
+        } else if byte == b'-' && value_str.is_empty() {
+            value_str.push('-');
+        } else {
+            return Err("Invalid ASCII values in array");
+        }
+    }
+
+    if value_str.is_empty() || (value_str == "-") || (value_str == ".") {
+        return Err("Invalid input format");
+    }
+
+    match value_str.parse::<f32>() {
+        Ok(value) => Ok(value),
+        Err(_) => Err("Failed to parse as f32"),
+    }
+}
+
 /// Returns true if two numbers have the same sign, otherwise false
 pub fn opposite_signs<T: PartialOrd + Signed>(a: T, b: T) -> bool {
     if (a * b) >= T::zero() {
@@ -126,5 +174,34 @@ mod tests {
         assert_eq!(opposite_signs(0, -1), false);
         assert_eq!(opposite_signs(1, -1), true);
         assert_eq!(opposite_signs(1.1, -1.1), true);
+    }
+
+    #[test]
+    fn test_f32_to_ascii() {
+        let v1: f32 = 3.14;
+        let ascii_arr1: Vec<u8> = f32_to_ascii(v1);
+        assert_eq!(ascii_arr1[0], b'3');
+        assert_eq!(ascii_arr1[1], b'.');
+        assert_eq!(ascii_arr1[2], b'1');
+        assert_eq!(ascii_arr1[3], b'4');
+
+        let v: f32 = -3.14;
+        let ascii_arr: Vec<u8> = f32_to_ascii(v);
+        assert_eq!(ascii_arr[0], b'-');
+        assert_eq!(ascii_arr[1], b'3');
+        assert_eq!(ascii_arr[2], b'.');
+        assert_eq!(ascii_arr[3], b'1');
+        assert_eq!(ascii_arr[4], b'4');
+    }
+
+    #[test]
+    fn test_ascii_to_f32() {
+        let ascii_arr = vec![b'3', b'.', b'1', b'4'];
+        let v = ascii_to_f32(ascii_arr).unwrap();
+        assert!(almost_equal(v, 3.14, 1e-6));
+
+        let ascii_arr = vec![b'-', b'3', b'.', b'1', b'4'];
+        let v = ascii_to_f32(ascii_arr).unwrap();
+        assert!(almost_equal(v, -3.14, 1e-6));
     }
 }
