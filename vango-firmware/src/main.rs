@@ -27,7 +27,7 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 // diff-drive
 use diff_drive::ddrive::{DiffDrive, WheelState};
 use diff_drive::rigid2d::{Pose2D, Twist2D};
-use diff_drive::utils::{normalize_angle, rad2deg};
+use diff_drive::utils::rad2deg;
 
 // local modules
 mod encoder;
@@ -66,6 +66,7 @@ const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 // PD controller gains
 const KP: f32 = 0.3;
 const KD: f32 = 1.2;
+const DIR_CHANGE_THRESHOLD: f32 = 0.5;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
@@ -221,9 +222,9 @@ fn main() -> anyhow::Result<()> {
     let monitor = FreeRtosMonitor::new();
     let monitor_notify = monitor.notifier();
 
+    const ALPHA: f32 = 0.1;
     let mut left_speed_smooth = 0.0;
     let mut right_speed_smooth = 0.0;
-    const ALPHA: f32 = 0.1;
     let mut left_err_last = 0.0;
     let mut right_err_last = 0.0;
 
@@ -263,12 +264,33 @@ fn main() -> anyhow::Result<()> {
             LEFT_SPEED.store(left_speed, Ordering::SeqCst);
             RIGHT_SPEED.store(right_speed, Ordering::SeqCst);
 
-            // Load target speeds and compute error
+            // Load target speeds
             let mut target_speed_left = TARGET_SPEED_LEFT.load(Ordering::SeqCst);
             let mut target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
+
+            // prevent abrupt direction changes
+            if utils::opposite_signs(target_speed_left, left_speed)
+                && left_speed.abs() > DIR_CHANGE_THRESHOLD
+            {
+                target_speed_left = if left_speed > 0.0 {
+                    DIR_CHANGE_THRESHOLD
+                } else {
+                    -DIR_CHANGE_THRESHOLD
+                };
+            }
+            if utils::opposite_signs(target_speed_right, right_speed)
+                && right_speed.abs() > DIR_CHANGE_THRESHOLD
+            {
+                target_speed_right = if right_speed > 0.0 {
+                    DIR_CHANGE_THRESHOLD
+                } else {
+                    -DIR_CHANGE_THRESHOLD
+                };
+            }
+
+            // Compute the error and derivative error
             let err_left = target_speed_left - left_speed;
             let err_right = target_speed_right - right_speed;
-
             let drv_err_left = err_left - left_err_last;
             let drv_err_right = err_right - right_err_last;
 
@@ -321,6 +343,8 @@ fn main() -> anyhow::Result<()> {
             // Set the motor to this duty cycle
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
+
+            println!("{},{}", left_speed, right_speed);
         })
         .unwrap();
 
@@ -329,34 +353,50 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
-
-    let mut count = 0;
-    let mut t0 = SYS_TIMER.now().as_millis();
-    let target_twist = Twist2D::new(0.0, 0.2, 0.0);
-    let target_speeds = robot.speeds_from_twist(target_twist);
-    TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
-    TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
     loop {
-        let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
-        let t = SYS_TIMER.now().as_millis() - t0;
-        if isr_flag {
-            let wheel_angles = WheelState::new(
-                LEFT_ANGLE.load(Ordering::Relaxed),
-                RIGHT_ANGLE.load(Ordering::Relaxed),
-            );
-            let pose = robot.forward_kinematics(wheel_angles);
-            if count >= 1 {
-                println!(
-                    "{},{},{},{},{},{}",
-                    t, wheel_angles.left, wheel_angles.right, pose.theta, pose.x, pose.y
-                );
-                count = 0;
-            } else {
-                count += 1;
-            }
-            ISR_FLAG.store(false, Ordering::Relaxed);
-        } else {
-            FreeRtos::delay_ms(1); // prevents WDT triggering
-        }
+        let target_twist = Twist2D::new(0.0, 0.2, 0.0);
+        let target_speeds = robot.speeds_from_twist(target_twist);
+        TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
+        // println!("Speeds = {}", target_speeds);
+        FreeRtos::delay_ms(3000);
+
+        let target_twist = Twist2D::new(0.0, -0.2, 0.0);
+        let target_speeds = robot.speeds_from_twist(target_twist);
+        TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
+        TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
+        // println!("Speeds = {}", target_speeds);
+        FreeRtos::delay_ms(3000);
     }
+
+    // let mut count = 0;
+    // let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    // let mut t0 = SYS_TIMER.now().as_millis();
+    // let target_twist = Twist2D::new(0.0, 0.2, 0.0);
+    // let target_speeds = robot.speeds_from_twist(target_twist);
+    // TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
+    // TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
+    // loop {
+    //     let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+    //     let t = SYS_TIMER.now().as_millis() - t0;
+    //     if isr_flag {
+    //         let wheel_angles = WheelState::new(
+    //             LEFT_ANGLE.load(Ordering::Relaxed),
+    //             RIGHT_ANGLE.load(Ordering::Relaxed),
+    //         );
+    //         let pose = robot.forward_kinematics(wheel_angles);
+    //         if count >= 1 {
+    //             println!(
+    //                 "{},{},{},{},{},{}",
+    //                 t, wheel_angles.left, wheel_angles.right, pose.theta, pose.x, pose.y
+    //             );
+    //             count = 0;
+    //         } else {
+    //             count += 1;
+    //         }
+    //         ISR_FLAG.store(false, Ordering::Relaxed);
+    //     } else {
+    //         FreeRtos::delay_ms(1); // prevents WDT triggering
+    //     }
+    // }
 }
