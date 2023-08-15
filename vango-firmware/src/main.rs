@@ -61,7 +61,7 @@ const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002
 const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
 const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
-// const PID_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
+const POSE_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
 
 // PD controller gains
 const KP: f32 = 0.3;
@@ -104,6 +104,14 @@ fn main() -> anyhow::Result<()> {
         log::info!("Waypoint: {:?}", waypoint_bytes);
     });
 
+    // BLE characteristic for pose estimate from odometry
+    let pose_blec = ble_service
+        .lock()
+        .create_characteristic(POSE_UUID, NimbleProperties::READ);
+    pose_blec.lock().on_read(move |v, _| {
+        v.set_value(&utils::f32_to_ascii(1.0));
+    });
+
     // BLE characteristic for left motor speed
     let left_speed_blec = ble_service.lock().create_characteristic(
         LEFT_SPEED_UUID,
@@ -112,16 +120,13 @@ fn main() -> anyhow::Result<()> {
     left_speed_blec
         .lock()
         .on_read(move |v, _| {
-            // let speed = LEFT_RPM.load(Ordering::Relaxed);
             let speed = LEFT_SPEED.load(Ordering::Relaxed);
-            // v.set_value(&utils::int_to_bytes(speed));
-            v.set_value(&utils::int_to_bytes(0));
-            log::info!("Left speed = {:?}", speed);
+            v.set_value(&utils::f32_to_ascii(speed));
         })
         .on_write(move |recv| {
-            let rpm_target_recv: i16 = utils::bytes_to_int(recv.recv_data).unwrap();
-            log::info!("Left speed target {:?}", rpm_target_recv);
-            TARGET_SPEED_LEFT.store(rpm_target_recv as f32, Ordering::SeqCst);
+            let target_recv: f32 = utils::ascii_to_f32(recv.recv_data.to_vec()).unwrap();
+            // log::info!("Left speed target {:?}", target_recv);
+            TARGET_SPEED_LEFT.store(target_recv, Ordering::SeqCst);
         });
 
     // BLE characteristic for right motor speed
@@ -132,16 +137,13 @@ fn main() -> anyhow::Result<()> {
     right_speed_blec
         .lock()
         .on_read(move |v, _| {
-            // let speed = RIGHT_RPM.load(Ordering::Relaxed);
             let speed = RIGHT_SPEED.load(Ordering::Relaxed);
-            // v.set_value(&utils::int_to_bytes(speed));
-            v.set_value(&utils::int_to_bytes(0));
-            log::info!("Right speed = {:?}", speed);
+            v.set_value(&utils::f32_to_ascii(speed));
         })
         .on_write(move |recv| {
-            let rpm_target_recv: i16 = utils::bytes_to_int(recv.recv_data).unwrap();
-            log::info!("Right speed target {:?}", rpm_target_recv);
-            TARGET_SPEED_RIGHT.store(rpm_target_recv as f32, Ordering::SeqCst);
+            let target_recv: f32 = utils::ascii_to_f32(recv.recv_data.to_vec()).unwrap();
+            // log::info!("Right speed target {:?}", target_recv);
+            TARGET_SPEED_RIGHT.store(target_recv, Ordering::SeqCst);
         });
 
     // BLE characteristics for reading right encoder counts
@@ -151,7 +153,7 @@ fn main() -> anyhow::Result<()> {
     right_counts_blec.lock().on_read(move |v, _| {
         let counts = RIGHT_COUNT.load(Ordering::Relaxed);
         v.set_value(&utils::int_to_bytes(counts));
-        log::info!("Right counts read: {:?}", counts);
+        // log::info!("Right counts read: {:?}", counts);
     });
 
     // BLE characteristics for reading left encoder counts
@@ -161,7 +163,7 @@ fn main() -> anyhow::Result<()> {
     left_counts_blec.lock().on_read(move |v, _| {
         let counts = LEFT_COUNT.load(Ordering::Relaxed);
         v.set_value(&utils::int_to_bytes(counts));
-        log::info!("Left counts read: {:?}", counts);
+        // log::info!("Left counts read: {:?}", counts);
     });
 
     // start BLE advertising
@@ -343,8 +345,6 @@ fn main() -> anyhow::Result<()> {
             // Set the motor to this duty cycle
             let _ = left_pwm_driver.set_duty(left_duty as u32);
             let _ = right_pwm_driver.set_duty(right_duty as u32);
-
-            println!("{},{}", left_speed, right_speed);
         })
         .unwrap();
 
@@ -353,50 +353,31 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let mut count = 0;
+    let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let mut t0 = SYS_TIMER.now().as_millis();
     loop {
-        let target_twist = Twist2D::new(0.0, 0.2, 0.0);
-        let target_speeds = robot.speeds_from_twist(target_twist);
-        TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
-        // println!("Speeds = {}", target_speeds);
-        FreeRtos::delay_ms(3000);
-
-        let target_twist = Twist2D::new(0.0, -0.2, 0.0);
-        let target_speeds = robot.speeds_from_twist(target_twist);
-        TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
-        // println!("Speeds = {}", target_speeds);
-        FreeRtos::delay_ms(3000);
+        FreeRtos::delay_ms(1000);
+        // let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+        // let t = SYS_TIMER.now().as_millis() - t0;
+        // if isr_flag {
+        //     let wheel_angles = WheelState::new(
+        //         LEFT_ANGLE.load(Ordering::Relaxed),
+        //         RIGHT_ANGLE.load(Ordering::Relaxed),
+        //     );
+        //     let pose = robot.forward_kinematics(wheel_angles);
+        //     if count >= 5 {
+        //         println!(
+        //             "{},{},{},{},{},{}",
+        //             t, wheel_angles.left, wheel_angles.right, pose.theta, pose.x, pose.y
+        //         );
+        //         count = 0;
+        //     } else {
+        //         count += 1;
+        //     }
+        //     ISR_FLAG.store(false, Ordering::Relaxed);
+        // } else {
+        //     FreeRtos::delay_ms(1); // prevents WDT triggering
+        // }
     }
-
-    // let mut count = 0;
-    // let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
-    // let mut t0 = SYS_TIMER.now().as_millis();
-    // let target_twist = Twist2D::new(0.0, 0.2, 0.0);
-    // let target_speeds = robot.speeds_from_twist(target_twist);
-    // TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
-    // TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
-    // loop {
-    //     let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
-    //     let t = SYS_TIMER.now().as_millis() - t0;
-    //     if isr_flag {
-    //         let wheel_angles = WheelState::new(
-    //             LEFT_ANGLE.load(Ordering::Relaxed),
-    //             RIGHT_ANGLE.load(Ordering::Relaxed),
-    //         );
-    //         let pose = robot.forward_kinematics(wheel_angles);
-    //         if count >= 1 {
-    //             println!(
-    //                 "{},{},{},{},{},{}",
-    //                 t, wheel_angles.left, wheel_angles.right, pose.theta, pose.x, pose.y
-    //             );
-    //             count = 0;
-    //         } else {
-    //             count += 1;
-    //         }
-    //         ISR_FLAG.store(false, Ordering::Relaxed);
-    //     } else {
-    //         FreeRtos::delay_ms(1); // prevents WDT triggering
-    //     }
-    // }
 }
