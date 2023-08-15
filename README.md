@@ -12,6 +12,7 @@ at *INSERT LINK TO DOCS*.
 - `vango-utils` is a utility library used by both the firmware and client.
 - `hardware` directory contains the KiCAD project for the PCB
 
+## Future Development
 This project also uses another library I have developed, [diff-drive](https://github.com/nmarks99/diff-drive),
 primarily for pose estimation via wheel odometry. In the future I hope to use both the VanGo and diff-drive projects
 as starting points for developing a general purpose, high-performance, and open-source, differential drive robot
