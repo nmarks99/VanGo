@@ -13,8 +13,7 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
 mod cluster;
-// use diff_drive::rigid2d::Vector2D;
-
+use diff_drive::rigid2d::Pose2D;
 use vango_utils::{ascii_to_f32, f32_to_ascii};
 
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
@@ -23,7 +22,9 @@ const RIGHT_SPEED_UUID: Uuid = Uuid::from_u128(0xc0ffc89c_29bb_11ee_be56_0242ac1
 const LEFT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a286b70_2c2b_11ee_be56_0242ac120002);
 const RIGHT_COUNTS_UUID: Uuid = Uuid::from_u128(0x0a28672e_2c2b_11ee_be56_0242ac120002);
 const WAYPOINT_UUID: Uuid = Uuid::from_u128(0x21e16dea_357a_11ee_be56_0242ac120002);
-const POSE_UUID: Uuid = Uuid::from_u128(0x3cedc40e_3655_11ee_be56_0242ac120002);
+const POSE_THETA_UUID: Uuid = Uuid::from_u128(0x3cedc40e_3655_11ee_be56_0242ac120002);
+const POSE_X_UUID: Uuid = Uuid::from_u128(0xa0c2b3b2_3b1a_11ee_be56_0242ac120002);
+const POSE_Y_UUID: Uuid = Uuid::from_u128(0xa0c2b65a_3b1a_11ee_be56_0242ac120002);
 
 // const WHEEL_RADIUS: f64 = 0.042;
 // const WHEEL_SEPARATION: f64 = 0.100;
@@ -103,25 +104,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|x| x.uuid() == RIGHT_SPEED_UUID)
         .ok_or("Right speed characteristic not found")?;
 
-    let left_counts_chr = characteristics
-        .iter()
-        .find(|x| x.uuid() == LEFT_COUNTS_UUID)
-        .ok_or("Left count characteristic not found")?;
-
-    let right_counts_chr = characteristics
-        .iter()
-        .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
-        .ok_or("Right count characteristic not found")?;
+    // let left_counts_chr = characteristics
+    //     .iter()
+    //     .find(|x| x.uuid() == LEFT_COUNTS_UUID)
+    //     .ok_or("Left count characteristic not found")?;
+    //
+    // let right_counts_chr = characteristics
+    //     .iter()
+    //     .find(|x| x.uuid() == RIGHT_COUNTS_UUID)
+    //     .ok_or("Right count characteristic not found")?;
 
     let waypoint_chr = characteristics
         .iter()
         .find(|x| x.uuid() == WAYPOINT_UUID)
         .ok_or("Waypoint characteristic not found")?;
 
-    let pose_chr = characteristics
+    let pose_x_chr = characteristics
         .iter()
-        .find(|x| x.uuid() == POSE_UUID)
-        .ok_or("Pose characteristic not found")?;
+        .find(|x| x.uuid() == POSE_X_UUID)
+        .ok_or("Pose x characteristic not found")?;
+
+    let pose_y_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == POSE_Y_UUID)
+        .ok_or("Pose y characteristic not found")?;
+
+    let pose_theta_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == POSE_THETA_UUID)
+        .ok_or("Pose theta characteristic not found")?;
 
     info!("Connected all characteristics");
 
@@ -133,7 +144,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut speed: f32 = BASE_SPEED.into();
         let mut left_speed: f32 = 0.0;
         let mut right_speed: f32 = 0.0;
-        let pose_chr1 = pose_chr.clone();
+        let pose_x_chr1 = pose_x_chr.clone();
+        let pose_y_chr1 = pose_y_chr.clone();
+        let pose_theta_chr1 = pose_theta_chr.clone();
         let task_handle = tokio::spawn(async move {
             loop {
                 write!(
@@ -143,8 +156,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     termion::clear::CurrentLine
                 )
                 .unwrap();
-                let p = pose_chr1.read().await.unwrap();
-                print!("pose = {}", ascii_to_f32(p).unwrap());
+
+                let pose = Pose2D::new(
+                    ascii_to_f32(pose_x_chr1.read().await.unwrap()).unwrap(),
+                    ascii_to_f32(pose_y_chr1.read().await.unwrap()).unwrap(),
+                    ascii_to_f32(pose_theta_chr1.read().await.unwrap()).unwrap(),
+                );
+                print!("{}", pose);
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
@@ -255,6 +273,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Autonomous mode
     } else if mode == Mode::Auto {
+        println!("Auto mode unimplemented");
 
         // =============================
 
@@ -286,6 +305,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // - compute the optimal controls (wheel speeds)
         // - send control signals to motors with BLE
     } else if mode == Mode::Debug {
+        println!("Debug mode unimplemented");
     }
 
     Ok(())
