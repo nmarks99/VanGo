@@ -66,11 +66,20 @@ pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
     } else if cfg!(target_pointer_width = "32") {
         num_string = (num.to_i32().unwrap()).to_string();
     } else {
-        warn!("Unknown architecture pointer width");
+        warn!("Unknown architecture pointer width, defaulting to 32bit integer");
         num_string = (num.to_i32().unwrap()).to_string();
     }
     let num_bytes_vec = num_string.as_bytes().to_vec();
     num_bytes_vec
+}
+
+/// Returns true if two numbers have the same sign, otherwise false
+pub fn opposite_signs<T: PartialOrd + Signed>(a: T, b: T) -> bool {
+    if (a * b) >= T::zero() {
+        return false;
+    } else {
+        return true;
+    }
 }
 
 #[cfg(test)]
@@ -105,5 +114,17 @@ mod tests {
         for i in 0..x_bytes.len() {
             assert_eq!(x_bytes[i], check[i]);
         }
+    }
+
+    #[test]
+    fn test_opposite_signs() {
+        assert_eq!(opposite_signs(1.0, 1.0), false);
+        assert_eq!(opposite_signs(1, 1), false);
+        assert_eq!(opposite_signs(0.0, 0.0), false);
+        assert_eq!(opposite_signs(0, 0), false);
+        assert_eq!(opposite_signs(0, 1), false);
+        assert_eq!(opposite_signs(0, -1), false);
+        assert_eq!(opposite_signs(1, -1), true);
+        assert_eq!(opposite_signs(1.1, -1.1), true);
     }
 }
