@@ -68,7 +68,7 @@ const KP: f32 = 0.3;
 const KD: f32 = 1.2;
 
 // Robot paramaters
-const WHEEL_RADIUS: f32 = 0.045; // meters
+const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
 const WHEEL_SEPARATION: f32 = 0.103; // meters
 
 fn main() -> anyhow::Result<()> {
@@ -227,8 +227,6 @@ fn main() -> anyhow::Result<()> {
     let mut left_err_last = 0.0;
     let mut right_err_last = 0.0;
 
-    let t0 = SYS_TIMER.now().as_millis();
-
     // Timer based ISR
     let task_timer = task_timer
         .timer(move || {
@@ -331,70 +329,34 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
-    let mut pose = Pose2D::new(0.0, 0.0, 0.0);
-    let mut twist = Twist2D::new(0.0, 0.0, 0.0);
-    let mut wheel_speeds = WheelState::new(
-        LEFT_SPEED.load(Ordering::Relaxed),
-        RIGHT_SPEED.load(Ordering::Relaxed),
-    );
-    let mut wheel_angles = WheelState::new(
-        LEFT_ANGLE.load(Ordering::Relaxed),
-        RIGHT_ANGLE.load(Ordering::Relaxed),
-    );
 
     let mut count = 0;
+    let mut t0 = SYS_TIMER.now().as_millis();
+    let target_twist = Twist2D::new(0.0, 0.2, 0.0);
+    let target_speeds = robot.speeds_from_twist(target_twist);
+    TARGET_SPEED_LEFT.store(target_speeds.left, Ordering::Relaxed);
+    TARGET_SPEED_RIGHT.store(target_speeds.right, Ordering::Relaxed);
     loop {
-        TARGET_SPEED_LEFT.store(10.0, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(10.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
-
-        TARGET_SPEED_LEFT.store(0.01, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(0.01, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
-
-        TARGET_SPEED_LEFT.store(-10.0, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(-10.0, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
-
-        TARGET_SPEED_LEFT.store(-0.01, Ordering::Relaxed);
-        TARGET_SPEED_RIGHT.store(-0.01, Ordering::Relaxed);
-        FreeRtos::delay_ms(3000);
+        let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
+        let t = SYS_TIMER.now().as_millis() - t0;
+        if isr_flag {
+            let wheel_angles = WheelState::new(
+                LEFT_ANGLE.load(Ordering::Relaxed),
+                RIGHT_ANGLE.load(Ordering::Relaxed),
+            );
+            let pose = robot.forward_kinematics(wheel_angles);
+            if count >= 1 {
+                println!(
+                    "{},{},{},{},{},{}",
+                    t, wheel_angles.left, wheel_angles.right, pose.theta, pose.x, pose.y
+                );
+                count = 0;
+            } else {
+                count += 1;
+            }
+            ISR_FLAG.store(false, Ordering::Relaxed);
+        } else {
+            FreeRtos::delay_ms(1); // prevents WDT triggering
+        }
     }
-
-    // loop {
-    //     let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
-    //     if isr_flag {
-    //         // Get current wheel speeds, angles, twist, and pose
-    //         wheel_speeds.left = LEFT_SPEED.load(Ordering::Relaxed);
-    //         wheel_speeds.right = RIGHT_SPEED.load(Ordering::Relaxed);
-    //         wheel_angles.left = normalize_angle(LEFT_ANGLE.load(Ordering::Relaxed));
-    //         wheel_angles.right = normalize_angle(RIGHT_ANGLE.load(Ordering::Relaxed));
-    //         twist = robot.twist_from_speeds(wheel_speeds);
-    //         pose = robot.forward_kinematics(wheel_angles);
-    //         let t = SYS_TIMER.now().as_millis() - t0;
-    //
-    //         // Limit the printing rate
-    //         if count >= 5 {
-    //             println!("Time: {} ms", t);
-    //             println!(
-    //                 "Counts = {}, {}",
-    //                 LEFT_COUNT.load(Ordering::Relaxed),
-    //                 RIGHT_COUNT.load(Ordering::Relaxed)
-    //             );
-    //             println!("Speeds = {} rad/s", wheel_speeds);
-    //             println!("Angles = {} rad", wheel_angles);
-    //             println!("Twist (theta,x,y) = {}", twist);
-    //             println!("Pose = {}", pose); // not quite right
-    //             println!("-----------------------------------------");
-    //             count = 0;
-    //         } else {
-    //             count += 1;
-    //         }
-    //
-    //         // Unset the ISR flag
-    //         ISR_FLAG.store(false, Ordering::Relaxed);
-    //     } else {
-    //         FreeRtos::delay_ms(1);
-    //     }
-    // }
 }
