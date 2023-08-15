@@ -8,5 +8,5 @@ A wheeled mobile robot that draws pictures.
 
 This project also uses another library I have developed, [diff-drive](https://github.com/nmarks99/diff-drive).
 Although still very much a work in progress, the diff-drive library provides
-an easy to use and somewhat generic framework for programming different drive robots. VanGo uses the diff-drive
+an easy to use and somewhat generic framework for programming differential drive robots. VanGo uses the diff-drive
 library primarily for pose estimation via wheel odometry.
