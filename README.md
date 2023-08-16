@@ -4,7 +4,7 @@ First, an SVG image is converted to XY coordinates using this online tool: [Coor
 Then, using these XY coordinates, a trajectory of waypoints is generated for the robot to follow.
 Trajectory tracking is implemented using the *INSERT ALGORITHM HERE* algorithm, and the robot determines its pose in space
 through wheel odometry, using quadrature encoders on the motors. For more in-depth information, please see the VanGo documentation
-at *INSERT LINK TO DOCS*.
+at [https://nmarks99.github.io/VanGo/](https://nmarks99.github.io/VanGo/).
 
 ## Project Structure
 - `vango-firmware` is the firmware for the ESP32 board based on [esp-idf-hal](https://github.com/esp-rs/esp-idf-hal)
