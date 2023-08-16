@@ -61,17 +61,16 @@ static POSE_THETA: AtomicF32 = AtomicF32::new(0.0);
 const VANGO_SERVICE_UUID: BleUuid = uuid128!("21470560-232e-11ee-be56-0242ac120002");
 const LEFT_SPEED_UUID: BleUuid = uuid128!("3c9a3f00-8ed3-4bdf-8a39-a01bebede295");
 const RIGHT_SPEED_UUID: BleUuid = uuid128!("c0ffc89c-29bb-11ee-be56-0242ac120002");
-// const LEFT_COUNTS_UUID: BleUuid = uuid128!("0a286b70-2c2b-11ee-be56-0242ac120002");
-// const RIGHT_COUNTS_UUID: BleUuid = uuid128!("0a28672e-2c2b-11ee-be56-0242ac120002");
 const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 const POSE_THETA_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
 const POSE_X_UUID: BleUuid = uuid128!("a0c2b3b2-3b1a-11ee-be56-0242ac120002");
 const POSE_Y_UUID: BleUuid = uuid128!("a0c2b65a-3b1a-11ee-be56-0242ac120002");
 
 // Speed controller
+// Proportional control seems fine and is faster
 const KP: f32 = 0.3;
 const KD: f32 = 0.0; // 1.2
-const DIR_CHANGE_THRESHOLD: f32 = 0.1;
+const DIR_CHANGE_THRESHOLD: f32 = 1.0;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
@@ -163,24 +162,6 @@ fn main() -> anyhow::Result<()> {
             let target_recv: f32 = utils::ascii_to_f32(recv.recv_data.to_vec()).unwrap();
             TARGET_SPEED_RIGHT.store(target_recv, Ordering::Release);
         });
-
-    // BLE characteristics for reading right encoder counts
-    // let right_counts_blec = ble_service
-    //     .lock()
-    //     .create_characteristic(RIGHT_COUNTS_UUID, NimbleProperties::READ);
-    // right_counts_blec.lock().on_read(move |v, _| {
-    //     let counts = RIGHT_COUNT.load(Ordering::Relaxed);
-    //     v.set_value(&utils::int_to_bytes(counts));
-    // });
-
-    // BLE characteristics for reading left encoder counts
-    // let left_counts_blec = ble_service
-    //     .lock()
-    //     .create_characteristic(LEFT_COUNTS_UUID, NimbleProperties::READ);
-    // left_counts_blec.lock().on_read(move |v, _| {
-    //     let counts = LEFT_COUNT.load(Ordering::Relaxed);
-    //     v.set_value(&utils::int_to_bytes(counts));
-    // });
 
     // start BLE advertising
     let ble_advertising = ble_device.get_advertising();
