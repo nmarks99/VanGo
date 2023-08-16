@@ -70,8 +70,8 @@ const POSE_Y_UUID: BleUuid = uuid128!("a0c2b65a-3b1a-11ee-be56-0242ac120002");
 
 // Speed controller
 const KP: f32 = 0.3;
-const KD: f32 = 1.2;
-const DIR_CHANGE_THRESHOLD: f32 = 0.5;
+const KD: f32 = 0.0; // 1.2
+const DIR_CHANGE_THRESHOLD: f32 = 0.1;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
@@ -319,24 +319,38 @@ fn main() -> anyhow::Result<()> {
             left_err_last = err_left;
             right_err_last = err_right;
 
-            // Handle target speeds for both directions.
+            // Adjust control signal based on sign of target speed
             let mut left_motor_dir: MotorDirection;
             let mut right_motor_dir: MotorDirection;
             if target_speed_left < 0.0 {
                 // Backward
                 u_left = -u_left;
                 let _ = left_direction.set_high();
-            } else {
+            } else if target_speed_left > 0.0 {
                 // Forward
                 let _ = left_direction.set_low();
+            } else {
+                if left_speed > 0.0 {
+                    let _ = left_direction.set_low();
+                } else if left_speed < 0.0 {
+                    u_left = -u_left;
+                    let _ = left_direction.set_high();
+                }
             }
             if target_speed_right < 0.0 {
                 // Backward
                 u_right = -u_right;
                 let _ = right_direction.set_low();
-            } else {
+            } else if target_speed_right > 0.0 {
                 // Forward
                 let _ = right_direction.set_high();
+            } else {
+                if right_speed > 0.0 {
+                    let _ = right_direction.set_high();
+                } else if right_speed < 0.0 {
+                    u_right = -u_right;
+                    let _ = right_direction.set_low();
+                }
             }
 
             // load the last duty cycle value and compute new duty cycle
