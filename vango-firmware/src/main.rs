@@ -31,12 +31,10 @@ use diff_drive::utils::rad2deg;
 
 // local modules
 mod encoder;
-mod motor;
 mod neopixel;
 mod pen;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
-use motor::MotorDirection;
 use neopixel::Neopixel;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
@@ -74,7 +72,7 @@ const DIR_CHANGE_THRESHOLD: f32 = 1.0;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
-const WHEEL_SEPARATION: f32 = 0.103; // meters
+const WHEEL_SEPARATION: f32 = 0.140; // meters
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -85,7 +83,7 @@ fn main() -> anyhow::Result<()> {
 
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
-    neo.set_color("white", 0.2)?;
+    neo.set_color("purple", 0.2)?;
 
     // Setup BLE server
     let ble_device = BLEDevice::take();
@@ -268,6 +266,7 @@ fn main() -> anyhow::Result<()> {
             let mut target_speed_right = TARGET_SPEED_RIGHT.load(Ordering::SeqCst);
 
             // prevent abrupt direction changes
+            // probably should just got immediately to zero then change direction
             if utils::opposite_signs(target_speed_left, left_speed)
                 && left_speed.abs() > DIR_CHANGE_THRESHOLD
             {
@@ -301,8 +300,6 @@ fn main() -> anyhow::Result<()> {
             right_err_last = err_right;
 
             // Adjust control signal based on sign of target speed
-            let mut left_motor_dir: MotorDirection;
-            let mut right_motor_dir: MotorDirection;
             if target_speed_left < 0.0 {
                 // Backward
                 u_left = -u_left;
@@ -354,8 +351,16 @@ fn main() -> anyhow::Result<()> {
             RIGHT_DUTY.store(right_duty, Ordering::SeqCst);
 
             // Set the motor to this duty cycle
-            let _ = left_pwm_driver.set_duty(left_duty as u32);
-            let _ = right_pwm_driver.set_duty(right_duty as u32);
+            if target_speed_left != 0.0 {
+                let _ = left_pwm_driver.set_duty(left_duty as u32);
+            } else {
+                let _ = left_pwm_driver.set_duty(0u32);
+            }
+            if target_speed_right != 0.0 {
+                let _ = right_pwm_driver.set_duty(right_duty as u32);
+            } else {
+                let _ = right_pwm_driver.set_duty(0u32);
+            }
         })
         .unwrap();
     task_timer
