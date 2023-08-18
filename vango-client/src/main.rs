@@ -25,6 +25,7 @@ const WAYPOINT_UUID: Uuid = Uuid::from_u128(0x21e16dea_357a_11ee_be56_0242ac1200
 const POSE_THETA_UUID: Uuid = Uuid::from_u128(0x3cedc40e_3655_11ee_be56_0242ac120002);
 const POSE_X_UUID: Uuid = Uuid::from_u128(0xa0c2b3b2_3b1a_11ee_be56_0242ac120002);
 const POSE_Y_UUID: Uuid = Uuid::from_u128(0xa0c2b65a_3b1a_11ee_be56_0242ac120002);
+const PEN_UUID: Uuid = Uuid::from_u128(0x0daaac7c_3d6a_11ee_be56_0242ac120002);
 
 // const WHEEL_RADIUS: f64 = 0.042;
 // const WHEEL_SEPARATION: f64 = 0.100;
@@ -62,6 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     // instatiate BLE adapter
+    info!("Looking for bluetooth adapter...");
     let adapter = Adapter::default()
         .await
         .ok_or("Bluetooth adapter not found")?;
@@ -133,6 +135,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .find(|x| x.uuid() == POSE_THETA_UUID)
         .ok_or("Pose theta characteristic not found")?;
+
+    let pen_chr = characteristics
+        .iter()
+        .find(|x| x.uuid() == PEN_UUID)
+        .ok_or("Pen characteristic not found")?;
 
     info!("Connected all characteristics");
 
@@ -219,6 +226,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // print!("Stop!\r\n");
                     left_speed = 0.0;
                     right_speed = 0.0;
+                }
+
+                Key::Char('u') => {
+                    pen_chr.write(&[b'1']).await.unwrap();
+                }
+
+                Key::Char('n') => {
+                    pen_chr.write(&[b'0']).await.unwrap();
                 }
 
                 // Increase speed by 10%

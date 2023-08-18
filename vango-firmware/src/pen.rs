@@ -9,21 +9,21 @@ use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::prelude::*;
 use esp_idf_sys::EspError;
 
-const UP_VALUE: u32 = 5;
-const DOWN_VALUE: u32 = 32;
+const UP_VALUE: u32 = 22;
+const DOWN_VALUE: u32 = 15;
 const PWM_FREQ: u32 = 50; // Hz
 
 #[derive(Debug, Copy, Clone)]
 pub enum PenState {
     UP,
-    DOWN
+    DOWN,
 }
 
 /// Pen object which provides methods for moving a servo
 /// between "UP" and "DOWN" states
 pub struct Pen<'a> {
     ledc_driver: LedcDriver<'a>,
-    state: PenState
+    state: PenState,
 }
 
 impl<'a> Pen<'a> {
@@ -64,7 +64,10 @@ impl<'a> Pen<'a> {
         )?;
         let mut ledc_driver = LedcDriver::new(ledc_channel, timer_driver, pin)?;
         ledc_driver.set_duty(UP_VALUE)?;
-        Ok(Self { ledc_driver, state: PenState::UP })
+        Ok(Self {
+            ledc_driver,
+            state: PenState::UP,
+        })
     }
 
     /// Moves the pen up
@@ -85,7 +88,6 @@ impl<'a> Pen<'a> {
     pub fn get_state(&self) -> anyhow::Result<PenState, EspError> {
         Ok(self.state)
     }
-
 }
 
 /// Converts a PenState into a boolean cooresponding
@@ -95,7 +97,7 @@ impl From<PenState> for bool {
     fn from(pen_state: PenState) -> Self {
         match pen_state {
             PenState::UP => false,
-            PenState::DOWN => true
+            PenState::DOWN => true,
         }
     }
 }

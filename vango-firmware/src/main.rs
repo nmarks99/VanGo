@@ -36,6 +36,7 @@ mod pen;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
 use neopixel::Neopixel;
+use pen::Pen;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
 
@@ -63,6 +64,7 @@ const WAYPOINT_UUID: BleUuid = uuid128!("21e16dea-357a-11ee-be56-0242ac120002");
 const POSE_THETA_UUID: BleUuid = uuid128!("3cedc40e-3655-11ee-be56-0242ac120002");
 const POSE_X_UUID: BleUuid = uuid128!("a0c2b3b2-3b1a-11ee-be56-0242ac120002");
 const POSE_Y_UUID: BleUuid = uuid128!("a0c2b65a-3b1a-11ee-be56-0242ac120002");
+const PEN_UUID: BleUuid = uuid128!("0daaac7c-3d6a-11ee-be56-0242ac120002");
 
 // Speed controller
 // Proportional control seems fine and is faster
@@ -85,6 +87,14 @@ fn main() -> anyhow::Result<()> {
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
     neo.set_color("purple", 0.2)?;
 
+    // Set up Pen
+    let mut pen = Pen::new(
+        peripherals.pins.gpio15,
+        peripherals.ledc.channel2,
+        peripherals.ledc.timer2,
+    )?;
+    pen.up()?;
+
     // Setup BLE server
     let ble_device = BLEDevice::take();
     let server = ble_device.get_server();
@@ -104,6 +114,22 @@ fn main() -> anyhow::Result<()> {
     waypoint_blec.lock().on_write(move |recv| {
         let waypoint_bytes = recv.recv_data;
         log::info!("Waypoint: {:?}", waypoint_bytes);
+    });
+
+    let pen_blec = ble_service
+        .lock()
+        .create_characteristic(PEN_UUID, NimbleProperties::WRITE | NimbleProperties::READ);
+    pen_blec.lock().on_write(move |recv| {
+        let v = recv.recv_data;
+        if v.len() == 1 {
+            if v[0] == b'1' {
+                let _ = pen.up();
+            } else if v[0] == b'0' {
+                let _ = pen.down();
+            }
+        } else {
+            log::error!("Invalid input to pen ble characteristic ")
+        }
     });
 
     // BLE characteristics for pose estimate from odometry
@@ -187,13 +213,6 @@ fn main() -> anyhow::Result<()> {
         )?,
         peripherals.pins.gpio17,
     )?;
-
-    // Set up Pen
-    // let mut pen = Pen::new(
-    //     peripherals.pins.gpio15,
-    //     peripherals.ledc.channel2,
-    //     peripherals.ledc.timer2,
-    // )?;
 
     // Set initial motor directions to forward
     let mut left_direction = PinDriver::output(peripherals.pins.gpio12)?;
@@ -351,12 +370,12 @@ fn main() -> anyhow::Result<()> {
             RIGHT_DUTY.store(right_duty, Ordering::SeqCst);
 
             // Set the motor to this duty cycle
-            if target_speed_left != 0.0 {
+            if target_speed_left.abs() > DIR_CHANGE_THRESHOLD {
                 let _ = left_pwm_driver.set_duty(left_duty as u32);
             } else {
                 let _ = left_pwm_driver.set_duty(0u32);
             }
-            if target_speed_right != 0.0 {
+            if target_speed_right.abs() > DIR_CHANGE_THRESHOLD {
                 let _ = right_pwm_driver.set_duty(right_duty as u32);
             } else {
                 let _ = right_pwm_driver.set_duty(0u32);
@@ -368,6 +387,9 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
+    let colors = vec!["red", "blue", "green", "purple", "yellow", "cyan", "white"];
+    let mut color_index: usize = 0;
+    let mut count = 0;
     loop {
         // If the values have been updated, compute the pose from odometry
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
@@ -381,6 +403,18 @@ fn main() -> anyhow::Result<()> {
             POSE_Y.store(pose.y, Ordering::Relaxed);
             POSE_THETA.store(pose.theta, Ordering::Relaxed);
             ISR_FLAG.store(false, Ordering::Relaxed);
+
+            if count > 10 {
+                neo.set_color(colors[color_index], 0.2)?;
+                if color_index < colors.len() - 1 {
+                    color_index += 1;
+                } else {
+                    color_index = 0;
+                }
+                count = 0;
+            } else {
+                count += 1;
+            }
         } else {
             FreeRtos::delay_ms(1); // prevents WDT triggering
         }
