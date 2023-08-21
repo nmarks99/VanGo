@@ -12,11 +12,45 @@ use esp_idf_hal::rmt::TxRmtDriver;
 use esp_idf_hal::rmt::{FixedLengthSignal, Pulse};
 use esp_idf_sys::EspError;
 
+#[derive(Debug, Clone, Copy)]
+pub enum Color {
+    Red,
+    Green,
+    Blue,
+    Purple,
+    Yellow,
+    Cyan,
+    White,
+}
+
+/// Neopixel RGB LED object
+///
+/// # Examples
+/// ```
+/// use esp_idf_hal::peripherals::Peripherals;
+/// use esp_idf_hal::prelude::*;
+/// use neopixel::{Neopixel, Color};
+///
+/// fn main() -> anyhow::Result<()> {
+///     esp_idf_sys::link_patches();
+///     let peripherals = Peripherals::take().unwrap();
+///
+///     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
+///     neo.set_color(Color::Purple, 0.2);
+/// ```
 pub struct Neopixel<'a> {
     tx_driver: TxRmtDriver<'a>,
 }
 
 impl<'a> Neopixel<'a> {
+    /// Creates a new Neopixel object for a given GPIO pin and esp_idf_hal::rmt::TxRmtDriver
+    ///
+    /// # Parameters
+    /// - `pin`: GPIO pin that the data-in pin of the neopixel is connected to on the MCU
+    /// - `rmt_channel`: an RMT channel
+    ///
+    /// # Returns
+    /// Neopixel object contianing a RMT Tx driver
     pub fn new(
         pin: impl Peripheral<P = impl OutputPin> + 'a,
         rmt_channel: impl Peripheral<P = impl RmtChannel> + 'a,
@@ -26,28 +60,37 @@ impl<'a> Neopixel<'a> {
         Ok(Self { tx_driver: rmt_tx })
     }
 
-    // if the provided color is not implemented, do nothing
-    pub fn set_color(&mut self, color: &str, brightness: f32) -> anyhow::Result<()> {
-        let rgb_op: Option<Rgb> = match color {
-            "red" => Some(Rgb::new(255, 0, 0)),
-            "green" => Some(Rgb::new(0, 255, 0)),
-            "blue" => Some(Rgb::new(0, 0, 255)),
-            "purple" => Some(Rgb::new(255, 0, 255)),
-            "yellow" => Some(Rgb::new(255, 255, 0)),
-            "cyan" => Some(Rgb::new(0, 255, 255)),
-            "white" => Some(Rgb::new(50, 50, 50)),
-            _ => None,
+    /// Sets the color of the neopixel to the given Color and brightness
+    ///
+    /// # Parameters
+    /// - `color`: Color enum
+    /// - `brightness`: brightness of the neopixel represented as an f32 between 0.0 and 1.0
+    pub fn set_color(&mut self, color: Color, brightness: f32) -> anyhow::Result<()> {
+        let rgb: Rgb = match color {
+            Color::Red => Rgb::new(255, 0, 0),
+            Color::Green => Rgb::new(0, 255, 0),
+            Color::Blue => Rgb::new(0, 0, 255),
+            Color::Purple => Rgb::new(255, 0, 255),
+            Color::Yellow => Rgb::new(255, 255, 0),
+            Color::Cyan => Rgb::new(0, 255, 255),
+            Color::White => Rgb::new(50, 50, 50),
         };
-        if rgb_op.is_some() {
-            self.set_rgb(rgb_op.unwrap(), brightness)?;
-        } else {
-            println!("Warning: Color {} not implemented for Neopixel", color);
-        }
+        self.set_rgb(rgb, brightness)?;
         Ok(())
     }
 
-    // sets the neopixel to the specified RGB
+    /// Sets the neopixel to the specified RGB value
+    ///
+    /// # Parameters
+    /// - `rgb`: Rgb object
+    /// - `brightness`: brightness of the neopixel represented as an f32 between 0.0 and 1.0
     pub fn set_rgb(&mut self, rgb: Rgb, brightness: f32) -> anyhow::Result<()> {
+        let mut brightness = brightness;
+        if brightness > 1.0 {
+            brightness = 1.0;
+        } else if brightness < 0.0 {
+            brightness = 0.0;
+        }
         let rgb = rgb * brightness;
         let color: u32 = rgb.into();
         let ticks_hz = self.tx_driver.counter_clock()?;

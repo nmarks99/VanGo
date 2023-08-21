@@ -26,8 +26,6 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
 // diff-drive
 use diff_drive::ddrive::{DiffDrive, WheelState};
-use diff_drive::rigid2d::{Pose2D, Twist2D};
-use diff_drive::utils::rad2deg;
 
 // local modules
 mod encoder;
@@ -35,7 +33,7 @@ mod neopixel;
 mod pen;
 use encoder::Encoder;
 use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
-use neopixel::Neopixel;
+use neopixel::{Color, Neopixel};
 use pen::Pen;
 use vango_utils as utils;
 // use pen::{Pen, PenState};
@@ -81,11 +79,9 @@ fn main() -> anyhow::Result<()> {
     let peripherals = Peripherals::take().unwrap();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    // let mut waypoints_vec: Vec<>
-
     // Set up neopixel
     let mut neo = Neopixel::new(peripherals.pins.gpio21, peripherals.rmt.channel0)?;
-    neo.set_color("purple", 0.2)?;
+    neo.set_color(Color::Purple, 0.2)?;
 
     // Set up Pen
     let mut pen = Pen::new(
@@ -95,7 +91,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     pen.up()?;
 
-    // Setup BLE server
+    // Set up BLE server
     let ble_device = BLEDevice::take();
     let server = ble_device.get_server();
     server.on_connect(|server, desc| {
@@ -116,19 +112,27 @@ fn main() -> anyhow::Result<()> {
         log::info!("Waypoint: {:?}", waypoint_bytes);
     });
 
+    // BLE characteristic for setting the pen up/down
     let pen_blec = ble_service
         .lock()
         .create_characteristic(PEN_UUID, NimbleProperties::WRITE | NimbleProperties::READ);
     pen_blec.lock().on_write(move |recv| {
         let v = recv.recv_data;
         if v.len() == 1 {
-            if v[0] == b'1' {
-                let _ = pen.up();
-            } else if v[0] == b'0' {
-                let _ = pen.down();
-            }
+            match v[0] {
+                b'1' => {
+                    let _ = pen.up();
+                }
+                b'0' => {
+                    let _ = pen.down();
+                }
+                _ => log::error!("Invalid input: '{}' to pen ble characteristic ", v[0]),
+            };
         } else {
-            log::error!("Invalid input to pen ble characteristic ")
+            log::error!(
+                "Invalid number of values sent to pen characteristic, expected 1, received {}",
+                v.len()
+            );
         }
     });
 
@@ -313,7 +317,7 @@ fn main() -> anyhow::Result<()> {
 
             // Compute the control signal (PID controller)
             let mut u_left = KP * err_left + KD * drv_err_left;
-            let mut u_right = KP * err_right + KD * drv_err_left;
+            let mut u_right = KP * err_right + KD * drv_err_right;
 
             left_err_last = err_left;
             right_err_last = err_right;
@@ -387,7 +391,15 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
-    let colors = vec!["red", "blue", "green", "purple", "yellow", "cyan", "white"];
+    let colors = vec![
+        Color::Red,
+        Color::Blue,
+        Color::Green,
+        Color::Yellow,
+        Color::Purple,
+        Color::Cyan,
+        Color::White,
+    ];
     let mut color_index: usize = 0;
     let mut count = 0;
     loop {
