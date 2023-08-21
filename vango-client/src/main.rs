@@ -13,6 +13,7 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
 mod cluster;
+mod trajectory;
 use diff_drive::rigid2d::Pose2D;
 use vango_utils::{ascii_to_f32, f32_to_ascii};
 
