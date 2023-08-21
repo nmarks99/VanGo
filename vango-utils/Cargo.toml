@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 num-traits = "0.2.16"
 log = "0.4.19"
+diff-drive = {git = "https://github.com/nmarks99/diff_drive.git" }

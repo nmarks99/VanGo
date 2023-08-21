@@ -11,7 +11,6 @@
 //!
 //! # Details
 //! TODO: explain more here
-
 use log::warn;
 use num_traits::{Float, PrimInt, Signed};
 
@@ -130,9 +129,116 @@ pub fn opposite_signs<T: PartialOrd + Signed>(a: T, b: T) -> bool {
     }
 }
 
+// // Normalizes any number to an arbitrary range
+// // by assuming the range wraps around when going below min or above max
+// double normalize( const double value, const double start, const double end )
+// {
+//   const double width       = end - start   ;   //
+//   const double offsetValue = value - start ;   // value relative to 0
+//
+//   return ( offsetValue - ( floor( offsetValue / width ) * width ) ) + start ;
+//   // + start to reset back to start of original range
+// }
+pub fn normalize_to_range(value: f32, start: f32, end: f32) -> f32 {
+    let width: f32 = end - start;
+    let offset_value: f32 = value - start;
+    offset_value - ((offset_value / width).floor() * width) + start
+}
+
+pub fn get_rotation_direction(current_angle: f32, target_angle: f32) -> bool {
+    use std::f32::consts::PI;
+    const RANGE_MIN: f32 = 0.0;
+    const RANGE_MAX: f32 = 2.0 * PI;
+    let a1 = normalize_to_range(current_angle, RANGE_MIN, RANGE_MAX);
+    let a2 = normalize_to_range(target_angle, RANGE_MIN, RANGE_MAX);
+
+    (a1 - a2).sin() >= 0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_rotation_direction() {
+        use std::f32::consts::PI;
+
+        assert_eq!(get_rotation_direction(PI / 3.0, 0.0), true, "Case 1");
+        assert_eq!(get_rotation_direction(-PI / 6.0, 0.0), false, "Case 2");
+        assert_eq!(get_rotation_direction(3.0 * PI / 4.0, 0.0), true, "Case 3");
+        assert_eq!(
+            get_rotation_direction(3.0 * PI / 4.0, -3.0 * PI / 4.0),
+            false,
+            "Case 4"
+        );
+        assert_eq!(
+            get_rotation_direction(-PI / 2.0, -PI / 4.0),
+            false,
+            "Case 5"
+        );
+    }
+
+    #[test]
+    fn test_normalize_to_range() {
+        use std::f32::consts::PI;
+        // [-180, 180]
+        {
+            const RANGE_MIN: f32 = -PI;
+            const RANGE_MAX: f32 = PI;
+            assert!(almost_equal(
+                normalize_to_range(PI, RANGE_MIN, RANGE_MAX),
+                -PI,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(0.0, RANGE_MIN, RANGE_MAX),
+                0.0,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(3.0 * PI / 2.0, RANGE_MIN, RANGE_MAX),
+                -PI / 2.0,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(-5.0 * PI / 2.0, RANGE_MIN, RANGE_MAX),
+                -PI / 2.0,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(-PI / 4.0, RANGE_MIN, RANGE_MAX),
+                -PI / 4.0,
+                1e-6
+            ));
+        }
+
+        // [0, 360]
+        {
+            const RANGE_MIN: f32 = 0.0;
+            const RANGE_MAX: f32 = 2.0 * PI;
+            assert!(almost_equal(
+                normalize_to_range(-PI / 2.0, RANGE_MIN, RANGE_MAX),
+                3.0 * PI / 2.0,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(0.0, RANGE_MIN, RANGE_MAX),
+                0.0,
+                1e-6
+            ));
+
+            assert!(almost_equal(
+                normalize_to_range(-PI / 3.0, RANGE_MIN, RANGE_MAX),
+                (2.0 * PI) - PI / 3.0,
+                1e-6
+            ));
+        }
+    }
 
     #[test]
     fn test_bytes_to_int_positive() {
