@@ -7,8 +7,8 @@ pub struct Path {
 
 // TODO: implement more basic paths
 impl Path {
-    pub fn semi_circle(radius: f32) -> Self {
-        let traj_x = linspace(0.0, radius * 2.0, 100);
+    pub fn semi_circle(radius: f32, npoints: usize) -> Self {
+        let traj_x = linspace(0.0, radius * 2.0, npoints);
         let mut traj_y: Vec<f32> = vec![];
         for xi in &traj_x {
             let y = (radius.powf(2.0) - (*xi as f32 - radius).powf(2.0)).sqrt();
@@ -31,6 +31,10 @@ impl Path {
         }
         Ok(())
     }
+
+    pub fn get_vec(&self) -> Vec<Vector2D<f32>> {
+        self.waypoints.clone()
+    }
 }
 
 fn linspace(start: f32, stop: f32, num_points: usize) -> Vec<f32> {
@@ -44,7 +48,7 @@ mod tests {
 
     #[test]
     fn test_semi_circle_path() {
-        let path = Path::semi_circle(0.2);
+        let path = Path::semi_circle(0.2, 10);
         let _ = path.write_to_csv("semi-circle.csv");
     }
 }

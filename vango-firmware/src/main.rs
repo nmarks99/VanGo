@@ -26,6 +26,7 @@ use esp32_nimble::{uuid128, BLEDevice, NimbleProperties};
 
 // diff-drive
 use diff_drive::ddrive::{DiffDrive, WheelState};
+use diff_drive::rigid2d::Pose2D;
 
 // local modules
 mod encoder;
@@ -36,7 +37,6 @@ use encoder::{ENCODER_RATE_MS, TICKS_PER_RAD};
 use neopixel::{Color, Neopixel};
 use pen::Pen;
 use vango_utils as utils;
-// use pen::{Pen, PenState};
 
 // Atomic variables
 static LEFT_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -67,12 +67,12 @@ const PEN_UUID: BleUuid = uuid128!("0daaac7c-3d6a-11ee-be56-0242ac120002");
 // Speed controller
 // Proportional control seems fine and is faster
 const KP: f32 = 0.3;
-const KD: f32 = 0.0; // 1.2
+const KD: f32 = 0.0;
 const DIR_CHANGE_THRESHOLD: f32 = 1.0;
 
 // Robot paramaters
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
-const WHEEL_SEPARATION: f32 = 0.140; // meters
+const WHEEL_SEPARATION: f32 = 0.105; // meters
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -402,15 +402,39 @@ fn main() -> anyhow::Result<()> {
     ];
     let mut color_index: usize = 0;
     let mut count = 0;
+
+    // let target_pose = Pose2D::new(0.0, 0.0, -3.14159);
+    // const SPEED: f32 = 2.5;
     loop {
         // If the values have been updated, compute the pose from odometry
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
         if isr_flag {
+            // Get current wheel angles and compute pose
             let wheel_angles = WheelState::new(
                 LEFT_ANGLE.load(Ordering::Relaxed),
                 RIGHT_ANGLE.load(Ordering::Relaxed),
             );
             let pose = robot.forward_kinematics(wheel_angles);
+
+            // if utils::almost_equal(pose.theta, target_pose.theta, 0.05) {
+            //     log::info!(
+            //         "Target reached!\nCurrent={}, Target={}",
+            //         pose.theta,
+            //         target_pose.theta
+            //     );
+            //     TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
+            //     TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
+            // } else {
+            //     let dir = utils::get_rotation_direction(pose.theta, target_pose.theta);
+            //     if dir {
+            //         TARGET_SPEED_LEFT.store(SPEED, Ordering::Relaxed);
+            //         TARGET_SPEED_RIGHT.store(-SPEED, Ordering::Relaxed);
+            //     } else {
+            //         TARGET_SPEED_LEFT.store(-SPEED, Ordering::Relaxed);
+            //         TARGET_SPEED_RIGHT.store(SPEED, Ordering::Relaxed);
+            //     }
+            // }
+
             POSE_X.store(pose.x, Ordering::Relaxed);
             POSE_Y.store(pose.y, Ordering::Relaxed);
             POSE_THETA.store(pose.theta, Ordering::Relaxed);
