@@ -7,7 +7,7 @@ file = sys.argv[1] if len(sys.argv) == 2 else None
 if file is None:
     raise RuntimeError("No input file specified")
 
-traj = np.loadtxt(file, delimiter=",", skiprows=1)
+traj = np.loadtxt(file, delimiter=",")
 fig, ax = plt.subplots()
 ax.scatter(traj[:,0], traj[:,1], color="blue")
 plt.show()

@@ -32,7 +32,7 @@ impl Path {
         Ok(())
     }
 
-    pub fn get_vec(&self) -> Vec<Vector2D<f32>> {
+    pub fn to_vec(&self) -> Vec<Vector2D<f32>> {
         self.waypoints.clone()
     }
 }
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn test_semi_circle_path() {
-        let path = Path::semi_circle(0.2, 10);
+        let path = Path::semi_circle(0.1, 10);
         let _ = path.write_to_csv("semi-circle.csv");
     }
 }

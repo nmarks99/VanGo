@@ -41,7 +41,7 @@ enum Mode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mode = Mode::Auto;
+    let mode = Mode::Manual;
     println!("Mode: {:?}", mode);
 
     // TODO: use clap for command line args
@@ -290,13 +290,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         const LINEAR_RES: f32 = 0.01;
 
         // Generate a semi-circle path
-        let path = Path::semi_circle(0.1, 10);
+        let path = Path::semi_circle(0.25, 10);
 
         // Get the current pose
-        for p in path.get_vec() {
+        let mut count = 1;
+        println!("Waypoints = {:?}", path.to_vec());
+        for p in path.to_vec() {
             let target_angle = f32::atan2(p.y, p.x);
-            info!("\n\nWaypoint: x:{},y:{}", p.x, p.y);
+            info!("\n\nWaypoint {}: x:{},y:{}", count, p.x, p.y);
             info!("Target heading: {}", rad2deg(target_angle));
+            count += 1;
 
             loop {
                 let pose = Pose2D::new(

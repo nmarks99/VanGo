@@ -1,7 +1,7 @@
 # Control
 VanGo's control architecture is comprised of a lower level speed control loop
 and a higher level trajectory tracking controller. From a user perspective, the lower level
-control loop can mostly be ignored, or at least treated as a black blox and not modified, while the
+control loop can mostly be ignored, or at least treated as a black box and not modified, while the
 higher level controller may leave more room for customization.
 
 ## Low-Level Speed Controller
@@ -11,7 +11,7 @@ a simply proportional controller was sufficient for closed-loop speed control, a
 control was also tested. Although PD control results is a smoother trajectory with less overshoot, the slower response
 was not worth the minimization of overshoot. Either way, both P and PD controllers work fairly well for closed-loop
 speed control, and if one is preferred by the user, the gains may be adjusted in the firmware and reflashed to the board.
-For more information on editing and flashing firmware, see [Development](./development.md).
+For more information on editing and flashing firmware, see [Development](./dev.md).
 
 The two images below show the speed controller response for both the Proportional and Proportional-Derivative controllers.
 <p><img src="./../images/p_speed_control.png" alt="Proportional control" /></p>

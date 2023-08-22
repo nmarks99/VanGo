@@ -185,7 +185,7 @@ a simply proportional controller was sufficient for closed-loop speed control, a
 control was also tested. Although PD control results is a smoother trajectory with less overshoot, the slower response
 was not worth the minimization of overshoot. Either way, both P and PD controllers work fairly well for closed-loop
 speed control, and if one is preferred by the user, the gains may be adjusted in the firmware and reflashed to the board.
-For more information on editing and flashing firmware, see <a href="./development.html">Development</a>.</p>
+For more information on editing and flashing firmware, see <a href="./dev.html">Development</a>.</p>
 <p>The two images below show the speed controller response for both the Proportional and Proportional-Derivative controllers.</p>
 <p><img src="./../images/p_speed_control.png" alt="Proportional control" /></p>
 <p><img src="./../images/pd_speed_control.png" alt="Proportional-Derivative control" /></p>
@@ -201,9 +201,9 @@ and wheel speeds, compute the necessary wheel speeds for tracking the desired tr
 speeds back to the robot over BLE.</p>
 <p><strong>Pros</strong></p>
 <ul>
-<li>Easier and faster to test the trajectory tracking algorithm since you will not need to reflash the ESP32</li>
-<li>Easier to test different trajectory tracking algorithms or enable several algorithms to be available and options to the user</li>
-<li>Can take advantage of a client machine with higher computing power than the ESP32</li>
+<li>Faster development time since you will not need to reflash the microcontroller</li>
+<li>Easier to test different trajectory tracking algorithms or enable several algorithms to be available as options to the user</li>
+<li>Can take advantage of a client machine with higher computing power than the microcontroller</li>
 </ul>
 <p><strong>Cons TODO: CHECK</strong></p>
 <ul>
