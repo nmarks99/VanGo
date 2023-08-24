@@ -20,14 +20,12 @@ The two images below show the speed controller response for both the Proportiona
 
 ## (TODO: Make sure this ok) High-Level Trajectory Controller
 The `vango-client` implements a trajectory tracking algorithm which is used to follow a trajectory defined
-by a set of waypoints. During development, there was a choice to be made regarding whether the the trajectory controller
-will operate on the client side or the firmware side. Both options have positives and negatives and will be briefly discussed
-below.
+by a set of waypoints. During development, there was a choice to be made regarding whether the trajectory controller
+will operate at the client application level or the firmware level. Both options have positives and negatives and will be briefly discussed below.
 
 ### Client-Side Trajectory Controller
 A client side trajectory controller works by implementing the trajectory tracking algorithm in the `vango-client`
-application. The controller will read information about the robot over bluetooth low-energy (BLE) such as the robot's current pose
-and wheel speeds, compute the necessary wheel speeds for tracking the desired trajectory, and send those target wheel
+application. The controller will obtain the robots current pose using bluetooth low-energy (BLE) and compute the necessary wheel speeds for tracking the desired trajectory, and send those target wheel
 speeds back to the robot over BLE.
 
 **Pros**
@@ -37,3 +35,20 @@ speeds back to the robot over BLE.
 
 **Cons TODO: CHECK**
 - Control loop speed is limited by BLE read/write latency. In it's current state, loop speeds top out around 30Hz.
+
+### Firmware-Side Trajectory Controller
+An alternative way to implement the trajectory tracking controller would be to implement the controller in the firmware on the microcontroller, obtaining the target path to follow from the client over BLE. Pros and Cons are listed below. 
+
+**Pros**
+- The MCU is capable of more precise and consistant timing through the use of hardware timers and interrupts 
+- BLE communication latency is no longer a concern since waypoints could be sent and processed beforehand
+
+**Cons**
+- Resources are somewhat limited on the MCU and may impose practical limits of which algorithms can be employed 
+- Slower development time since for the most part, modifications to the trajectory tacking algorithm require reflashing the board 
+
+### Choose: Client-Side Algorithm 
+Although performance/timing of the control loop could potentially be better if implemented in the MCU, it was determined that easy customization of algorithms as well as development time are key aspects of the project, this a client application level trajectory tracking algorithm was employed. 
+
+## Trajectory Tracking
+There are many different trajectory tracking algorithms in existance, however at this time only one,and perhaps the most basic one,the PID controller has been implemented for the VanGo robot. 
