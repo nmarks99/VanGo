@@ -13,11 +13,12 @@ use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
 mod cluster;
-mod trajectory;
-use diff_drive::rigid2d::Pose2D;
-use diff_drive::utils::rad2deg;
-use trajectory::Path;
-use vango_utils::{almost_equal, ascii_to_f32, f32_to_ascii, get_rotation_direction};
+use diff_drive::ddrive::{DiffDrive, WheelState};
+use diff_drive::rigid2d::{Pose2D, Twist2D, Vector2D};
+use diff_drive::trajectory::Path;
+use diff_drive::utils::{normalize_angle, rad2deg};
+use vango_utils as utils;
+use vango_utils::{almost_equal, ascii_to_f32, f32_to_ascii, get_min_angle};
 
 const VANGO_SERVICE_ID: Uuid = Uuid::from_u128(0x21470560_232e_11ee_be56_0242ac120002);
 const LEFT_SPEED_UUID: Uuid = Uuid::from_u128(0x3c9a3f00_8ed3_4bdf_8a39_a01bebede295);
@@ -31,6 +32,8 @@ const POSE_Y_UUID: Uuid = Uuid::from_u128(0xa0c2b65a_3b1a_11ee_be56_0242ac120002
 const PEN_UUID: Uuid = Uuid::from_u128(0x0daaac7c_3d6a_11ee_be56_0242ac120002);
 
 const BASE_SPEED: f32 = 1.5;
+const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
+const WHEEL_SEPARATION: f32 = 0.105; // meters
 
 #[derive(PartialEq, Debug)]
 enum Mode {
@@ -41,7 +44,7 @@ enum Mode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mode = Mode::Manual;
+    let mode = Mode::Auto;
     println!("Mode: {:?}", mode);
 
     // TODO: use clap for command line args
@@ -286,70 +289,100 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Autonomous mode
     } else if mode == Mode::Auto {
-        const ANGULAR_RES: f32 = 0.1;
-        const LINEAR_RES: f32 = 0.01;
+        let path = Path::semi_circle(0.2, 50);
+        let path_vec = path.to_vec();
+        // let path_vec = vec![
+        //     Vector2D::new(0.1, 0.1),
+        //     Vector2D::new(0.2, 0.2),
+        //     Vector2D::new(0.2, 0.1),
+        //     Vector2D::new(0.2, 0.0),
+        //     Vector2D::new(0.0, 0.0),
+        // ];
 
-        // Generate a semi-circle path
-        let path = Path::semi_circle(0.25, 10);
-
-        // Get the current pose
+        const KP: f32 = 1.2;
+        const KI: f32 = 0.003;
+        const KD: f32 = 0.2;
+        const THESHOLD_DISTANCE: f32 = 0.01;
+        let mut controller = PidController::new(KP, KI, KD);
+        let robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
         let mut count = 1;
-        println!("Waypoints = {:?}", path.to_vec());
-        for p in path.to_vec() {
-            let target_angle = f32::atan2(p.y, p.x);
-            info!("\n\nWaypoint {}: x:{},y:{}", count, p.x, p.y);
-            info!("Target heading: {}", rad2deg(target_angle));
+        for target_point in path_vec {
+            loop {
+                // get current pose of the robot
+                let pose = Pose2D::new(
+                    ascii_to_f32(pose_x_chr.read().await.unwrap()).unwrap(),
+                    ascii_to_f32(pose_y_chr.read().await.unwrap()).unwrap(),
+                    ascii_to_f32(pose_theta_chr.read().await.unwrap()).unwrap(),
+                );
+                let point = Vector2D::new(pose.x, pose.y);
+                println!("{},{}", point.x, point.y);
+                // info!("");
+                // info!("Pose = {}", pose);
+                let dist = point.distance(target_point);
+                if dist <= THESHOLD_DISTANCE {
+                    break;
+                }
+
+                let target_angle = normalize_angle(f32::atan2(
+                    target_point.y - point.y,
+                    target_point.x - point.x,
+                ));
+                // info!("Distance to target = {}", dist);
+                // info!("Target angle = {}", rad2deg(target_angle));
+
+                // Compute angular speed from controller
+                let err = get_min_angle(target_angle, pose.theta);
+                let u = controller.compute(err); // u is thetadot
+                let speeds = robot.speeds_from_twist(Twist2D::new(u, 0.03, 0.0));
+                // info!("err = {}", rad2deg(err));
+                // info!("u = {}", u);
+                // info!("Speeds = {}", speeds);
+
+                // Set wheel speeds
+                let left_speed_bytes = f32_to_ascii(speeds.left);
+                left_speed_chr.write(&left_speed_bytes).await.unwrap();
+                let right_speed_bytes = f32_to_ascii(speeds.right);
+                right_speed_chr.write(&right_speed_bytes).await.unwrap();
+            }
+
+            // left_speed_chr.write(&[b'0']).await.unwrap();
+            // right_speed_chr.write(&[b'0']).await.unwrap();
+            // info!("Target {} reached!\n\n", count);
             count += 1;
-
-            loop {
-                let pose = Pose2D::new(
-                    ascii_to_f32(pose_x_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_y_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_theta_chr.read().await.unwrap()).unwrap(),
-                );
-                // info!("rad: {}, x: {}, y: {}", pose.theta, pose.x, pose.y);
-                if almost_equal(pose.theta, target_angle, ANGULAR_RES) {
-                    info!("Heading reached!");
-                    break;
-                } else {
-                    if get_rotation_direction(pose.theta, target_angle) {
-                        let left_speed_bytes = f32_to_ascii(BASE_SPEED);
-                        left_speed_chr.write(&left_speed_bytes).await.unwrap();
-                        let right_speed_bytes = f32_to_ascii(-BASE_SPEED);
-                        right_speed_chr.write(&right_speed_bytes).await.unwrap();
-                    } else {
-                        let left_speed_bytes = f32_to_ascii(-BASE_SPEED);
-                        left_speed_chr.write(&left_speed_bytes).await.unwrap();
-                        let right_speed_bytes = f32_to_ascii(BASE_SPEED);
-                        right_speed_chr.write(&right_speed_bytes).await.unwrap();
-                    }
-                }
-            }
-
-            loop {
-                let pose = Pose2D::new(
-                    ascii_to_f32(pose_x_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_y_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_theta_chr.read().await.unwrap()).unwrap(),
-                );
-                // info!("rad: {}, x: {}, y: {}", pose.theta, pose.x, pose.y);
-                if almost_equal(pose.x, p.x, LINEAR_RES) || almost_equal(pose.y, p.y, LINEAR_RES) {
-                    info!("x: {}, y: {} reached!", p.x, p.y);
-                    break;
-                } else {
-                    let left_speed_bytes = f32_to_ascii(BASE_SPEED);
-                    left_speed_chr.write(&left_speed_bytes).await.unwrap();
-                    let right_speed_bytes = f32_to_ascii(BASE_SPEED);
-                    right_speed_chr.write(&right_speed_bytes).await.unwrap();
-                }
-            }
-            info!("Done!");
-            left_speed_chr.write(&[b'0']).await.unwrap();
-            right_speed_chr.write(&[b'0']).await.unwrap();
         }
+        info!("Done!");
+        left_speed_chr.write(&[b'0']).await.unwrap();
+        right_speed_chr.write(&[b'0']).await.unwrap();
     } else if mode == Mode::Debug {
         println!("Debug mode unimplemented");
     }
 
     Ok(())
+}
+
+struct PidController {
+    kp: f32,
+    ki: f32,
+    kd: f32,
+    err_prev: f32,
+    i_err: f32,
+}
+
+impl PidController {
+    fn new(kp: f32, ki: f32, kd: f32) -> Self {
+        Self {
+            kp,
+            ki,
+            kd,
+            err_prev: 0.0,
+            i_err: 0.0,
+        }
+    }
+
+    fn compute(&mut self, error: f32) -> f32 {
+        self.i_err += error;
+        let d_err: f32 = error - self.err_prev;
+        self.err_prev = error;
+        self.kp * error + self.ki * self.i_err + self.ki * d_err
+    }
 }

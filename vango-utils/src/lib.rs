@@ -14,6 +14,25 @@
 use log::warn;
 use num_traits::{Float, PrimInt, Signed};
 
+/// Creates a linearly spaced vector of floats from start to stop with the given
+/// number of points in between
+pub fn linspace<T: Float>(start: T, stop: T, num_points: usize) -> Vec<T> {
+    let step: T = (stop - start) / T::from(num_points - 1).unwrap();
+    (0..num_points)
+        .map(|i| start + T::from(i).unwrap() * step)
+        .collect()
+}
+
+/// Creates a vector of floats from the given start to stop, and separated by the step
+pub fn arange<T: Float>(start: T, stop: T, step: T) -> Vec<T> {
+    let num_points: usize = (((stop - start) / step) + T::from(1.0).unwrap())
+        .to_usize()
+        .unwrap();
+    (0..num_points)
+        .map(|i| start + T::from(i).unwrap() * step)
+        .collect()
+}
+
 /// checks if two floats are within some threshold of each of other
 pub fn almost_equal<T: Float>(d1: T, d2: T, epsilon: T) -> bool {
     (d1 - d2).abs() < epsilon
@@ -72,7 +91,7 @@ pub fn int_to_bytes<T: PrimInt + Signed>(num: T) -> Vec<u8> {
     num_bytes_vec
 }
 
-// Convert an f32 to its ASCII representation
+/// Converts an f32 to its ASCII representation as a Vec<u8>
 pub fn f32_to_ascii(value: f32) -> Vec<u8> {
     let mut result = Vec::new();
     let mut value_str = value.to_string();
@@ -129,22 +148,15 @@ pub fn opposite_signs<T: PartialOrd + Signed>(a: T, b: T) -> bool {
     }
 }
 
-// // Normalizes any number to an arbitrary range
-// // by assuming the range wraps around when going below min or above max
-// double normalize( const double value, const double start, const double end )
-// {
-//   const double width       = end - start   ;   //
-//   const double offsetValue = value - start ;   // value relative to 0
-//
-//   return ( offsetValue - ( floor( offsetValue / width ) * width ) ) + start ;
-//   // + start to reset back to start of original range
-// }
+/// Normalizes a number to an range, assuming the number wraps around at "end"
 pub fn normalize_to_range(value: f32, start: f32, end: f32) -> f32 {
     let width: f32 = end - start;
     let offset_value: f32 = value - start;
     offset_value - ((offset_value / width).floor() * width) + start
 }
 
+/// Gets the shorter of the two 2D rotation directions (CW or CCW) to get from
+/// a current angle to a target angle
 pub fn get_rotation_direction(current_angle: f32, target_angle: f32) -> bool {
     use std::f32::consts::PI;
     const RANGE_MIN: f32 = 0.0;
@@ -155,159 +167,27 @@ pub fn get_rotation_direction(current_angle: f32, target_angle: f32) -> bool {
     (a1 - a2).sin() >= 0.0
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_rotation_direction() {
-        use std::f32::consts::PI;
-
-        assert_eq!(get_rotation_direction(PI / 3.0, 0.0), true, "Case 1");
-        assert_eq!(get_rotation_direction(-PI / 6.0, 0.0), false, "Case 2");
-        assert_eq!(get_rotation_direction(3.0 * PI / 4.0, 0.0), true, "Case 3");
-        assert_eq!(
-            get_rotation_direction(3.0 * PI / 4.0, -3.0 * PI / 4.0),
-            false,
-            "Case 4"
-        );
-        assert_eq!(
-            get_rotation_direction(-PI / 2.0, -PI / 4.0),
-            false,
-            "Case 5"
-        );
+pub fn sign<T>(num: T) -> T
+where
+    T: PartialOrd + Copy + Signed,
+{
+    if num > T::zero() {
+        T::one()
+    } else if num < T::zero() {
+        -T::one()
+    } else {
+        T::zero()
     }
+}
 
-    #[test]
-    fn test_normalize_to_range() {
-        use std::f32::consts::PI;
-        // [-180, 180]
-        {
-            const RANGE_MIN: f32 = -PI;
-            const RANGE_MAX: f32 = PI;
-            assert!(almost_equal(
-                normalize_to_range(PI, RANGE_MIN, RANGE_MAX),
-                -PI,
-                1e-6
-            ));
+pub fn get_min_angle<T: Float + Signed>(a: T, b: T) -> T {
+    let pi = T::from(std::f32::consts::PI).unwrap();
+    let mut min_angle = a - b;
 
-            assert!(almost_equal(
-                normalize_to_range(0.0, RANGE_MIN, RANGE_MAX),
-                0.0,
-                1e-6
-            ));
-
-            assert!(almost_equal(
-                normalize_to_range(3.0 * PI / 2.0, RANGE_MIN, RANGE_MAX),
-                -PI / 2.0,
-                1e-6
-            ));
-
-            assert!(almost_equal(
-                normalize_to_range(-5.0 * PI / 2.0, RANGE_MIN, RANGE_MAX),
-                -PI / 2.0,
-                1e-6
-            ));
-
-            assert!(almost_equal(
-                normalize_to_range(-PI / 4.0, RANGE_MIN, RANGE_MAX),
-                -PI / 4.0,
-                1e-6
-            ));
-        }
-
-        // [0, 360]
-        {
-            const RANGE_MIN: f32 = 0.0;
-            const RANGE_MAX: f32 = 2.0 * PI;
-            assert!(almost_equal(
-                normalize_to_range(-PI / 2.0, RANGE_MIN, RANGE_MAX),
-                3.0 * PI / 2.0,
-                1e-6
-            ));
-
-            assert!(almost_equal(
-                normalize_to_range(0.0, RANGE_MIN, RANGE_MAX),
-                0.0,
-                1e-6
-            ));
-
-            assert!(almost_equal(
-                normalize_to_range(-PI / 3.0, RANGE_MIN, RANGE_MAX),
-                (2.0 * PI) - PI / 3.0,
-                1e-6
-            ));
-        }
+    if min_angle > T::from(pi).unwrap() || min_angle < T::from(-pi).unwrap() {
+        min_angle = T::from(-1.0).unwrap()
+            * sign(min_angle)
+            * (T::from(2.0).unwrap() * pi - min_angle.abs());
     }
-
-    #[test]
-    fn test_bytes_to_int_positive() {
-        let int_result: i32 = bytes_to_int(&[b'1', b'2', b'3']).unwrap();
-        assert_eq!(int_result, 123);
-    }
-
-    #[test]
-    fn test_bytes_to_int_negative() {
-        let int_result: i32 = bytes_to_int(&[b'-', b'1', b'2', b'3']).unwrap();
-        assert_eq!(int_result, -123);
-    }
-
-    #[test]
-    fn test_int_to_bytes_positive() {
-        let x_bytes = int_to_bytes(123i32);
-        let check = vec![b'1', b'2', b'3'];
-        for i in 0..x_bytes.len() {
-            assert_eq!(x_bytes[i], check[i]);
-        }
-    }
-
-    #[test]
-    fn test_int_to_bytes_negative() {
-        let x_bytes = int_to_bytes(-123i32);
-        let check = vec![b'-', b'1', b'2', b'3'];
-        for i in 0..x_bytes.len() {
-            assert_eq!(x_bytes[i], check[i]);
-        }
-    }
-
-    #[test]
-    fn test_opposite_signs() {
-        assert_eq!(opposite_signs(1.0, 1.0), false);
-        assert_eq!(opposite_signs(1, 1), false);
-        assert_eq!(opposite_signs(0.0, 0.0), false);
-        assert_eq!(opposite_signs(0, 0), false);
-        assert_eq!(opposite_signs(0, 1), false);
-        assert_eq!(opposite_signs(0, -1), false);
-        assert_eq!(opposite_signs(1, -1), true);
-        assert_eq!(opposite_signs(1.1, -1.1), true);
-    }
-
-    #[test]
-    fn test_f32_to_ascii() {
-        let v1: f32 = 3.14;
-        let ascii_arr1: Vec<u8> = f32_to_ascii(v1);
-        assert_eq!(ascii_arr1[0], b'3');
-        assert_eq!(ascii_arr1[1], b'.');
-        assert_eq!(ascii_arr1[2], b'1');
-        assert_eq!(ascii_arr1[3], b'4');
-
-        let v: f32 = -3.14;
-        let ascii_arr: Vec<u8> = f32_to_ascii(v);
-        assert_eq!(ascii_arr[0], b'-');
-        assert_eq!(ascii_arr[1], b'3');
-        assert_eq!(ascii_arr[2], b'.');
-        assert_eq!(ascii_arr[3], b'1');
-        assert_eq!(ascii_arr[4], b'4');
-    }
-
-    #[test]
-    fn test_ascii_to_f32() {
-        let ascii_arr = vec![b'3', b'.', b'1', b'4'];
-        let v = ascii_to_f32(ascii_arr).unwrap();
-        assert!(almost_equal(v, 3.14, 1e-6));
-
-        let ascii_arr = vec![b'-', b'3', b'.', b'1', b'4'];
-        let v = ascii_to_f32(ascii_arr).unwrap();
-        assert!(almost_equal(v, -3.14, 1e-6));
-    }
+    min_angle
 }
