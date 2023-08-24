@@ -289,18 +289,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Autonomous mode
     } else if mode == Mode::Auto {
-        let path = Path::semi_circle(0.2, 50);
-        let path_vec = path.to_vec();
-        // let path_vec = vec![
-        //     Vector2D::new(0.1, 0.1),
-        //     Vector2D::new(0.2, 0.2),
-        //     Vector2D::new(0.2, 0.1),
-        //     Vector2D::new(0.2, 0.0),
-        //     Vector2D::new(0.0, 0.0),
-        // ];
+        // let path = Path::semi_circle(0.2, 50);
+        // let path_vec = path.to_vec();
+        let path_vec = vec![
+            Vector2D::new(0.0, 0.5),
+            Vector2D::new(0.5, 0.5),
+            Vector2D::new(0.5, 0.0),
+            Vector2D::new(0.0, 0.0),
+        ];
 
-        const KP: f32 = 1.2;
-        const KI: f32 = 0.003;
+        const KP: f32 = 1.4;
+        const KI: f32 = 0.0075;
         const KD: f32 = 0.2;
         const THESHOLD_DISTANCE: f32 = 0.01;
         let mut controller = PidController::new(KP, KI, KD);
@@ -310,9 +309,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             loop {
                 // get current pose of the robot
                 let pose = Pose2D::new(
-                    ascii_to_f32(pose_x_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_y_chr.read().await.unwrap()).unwrap(),
-                    ascii_to_f32(pose_theta_chr.read().await.unwrap()).unwrap(),
+                    ascii_to_f32(pose_x_chr.read().await.expect("failed to read pose.x"))
+                        .expect("failed to convert pose.x ascii to f32"),
+                    ascii_to_f32(pose_y_chr.read().await.expect("failed to read pose.y"))
+                        .expect("failed to convert pose.y ascii to f32"),
+                    ascii_to_f32(
+                        pose_theta_chr
+                            .read()
+                            .await
+                            .expect("failed to read pose.theta"),
+                    )
+                    .expect("failed to convert pose.theta ascii to f32"),
                 );
                 let point = Vector2D::new(pose.x, pose.y);
                 println!("{},{}", point.x, point.y);
@@ -333,16 +340,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 // Compute angular speed from controller
                 let err = get_min_angle(target_angle, pose.theta);
                 let u = controller.compute(err); // u is thetadot
-                let speeds = robot.speeds_from_twist(Twist2D::new(u, 0.03, 0.0));
+                let speeds = robot.speeds_from_twist(Twist2D::new(u, 0.05, 0.0));
                 // info!("err = {}", rad2deg(err));
                 // info!("u = {}", u);
                 // info!("Speeds = {}", speeds);
 
                 // Set wheel speeds
                 let left_speed_bytes = f32_to_ascii(speeds.left);
-                left_speed_chr.write(&left_speed_bytes).await.unwrap();
+                left_speed_chr
+                    .write(&left_speed_bytes)
+                    .await
+                    .expect("set left speed failed");
                 let right_speed_bytes = f32_to_ascii(speeds.right);
-                right_speed_chr.write(&right_speed_bytes).await.unwrap();
+                right_speed_chr
+                    .write(&right_speed_bytes)
+                    .await
+                    .expect("set right speed failed");
             }
 
             // left_speed_chr.write(&[b'0']).await.unwrap();
@@ -351,8 +364,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             count += 1;
         }
         info!("Done!");
-        left_speed_chr.write(&[b'0']).await.unwrap();
-        right_speed_chr.write(&[b'0']).await.unwrap();
+        left_speed_chr
+            .write(&[b'0'])
+            .await
+            .expect("failed to set left zero");
+        right_speed_chr
+            .write(&[b'0'])
+            .await
+            .expect("failed to set right zero");
     } else if mode == Mode::Debug {
         println!("Debug mode unimplemented");
     }
