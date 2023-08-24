@@ -52,7 +52,7 @@ Although performance/timing of the control loop could potentially be better if i
 ## Trajectory Tracking Algorithm
 There are many different trajectory tracking algorithms in existance, however at this time only one,and perhaps the most basic one,the PID controller, has been implemented for the VanGo robot. There are various ways a PID controller can be applied to the trajectory tracking problem, however the method I've chosen to implement is to use a PID controller for angular velocity control. To move the robot from its current (x, y) to some goal position which is presumably along the target path, the algorithm works as follows: 
 1. Read the current pose (computed from wheel odometry) via BLE 
-2. Compute the target angle (heading)as $atan2(y_{goal} - y, x_{goal} - x)$
+2. Compute the target angle (heading)as \\(atan2(y_{goal} - y, x_{goal} - x)\\)
 3. Let the error be the minimum angle between the robots current heading and the target heading 
 4. Compute the angular velocity from the PID control for the given error 
 5. The target of the controller then is represented as a 2D twist (body velocity), using the computed target angular velocity, a constant x velocity of your choice, and a y velocity of 0.0 (which assumes no wheel slipping)
