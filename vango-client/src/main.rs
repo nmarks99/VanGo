@@ -34,6 +34,8 @@ const PEN_UUID: Uuid = Uuid::from_u128(0x0daaac7c_3d6a_11ee_be56_0242ac120002);
 const BASE_SPEED: f32 = 1.5;
 const WHEEL_RADIUS: f32 = 0.045 / 2.0; // meters
 const WHEEL_SEPARATION: f32 = 0.105; // meters
+const BYTES_ZERO: &[u8; 1] = &[b'0'];
+const BYTES_ONE: &[u8; 1] = &[b'1'];
 
 #[derive(PartialEq, Debug)]
 enum Mode {
@@ -44,7 +46,7 @@ enum Mode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mode = Mode::Auto;
+    let mode = Mode::Manual;
     println!("Mode: {:?}", mode);
 
     // TODO: use clap for command line args
@@ -109,11 +111,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|x| x.uuid() == RIGHT_SPEED_UUID)
         .ok_or("Right speed characteristic not found")?;
 
-    // let waypoint_chr = characteristics
-    //     .iter()
-    //     .find(|x| x.uuid() == WAYPOINT_UUID)
-    //     .ok_or("Waypoint characteristic not found")?;
-
     let pose_x_chr = characteristics
         .iter()
         .find(|x| x.uuid() == POSE_X_UUID)
@@ -176,15 +173,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
 
         for c in stdin.keys() {
-            // write!(
-            //     stdout,
-            //     "{} {}",
-            //     termion::clear::All,
-            //     termion::cursor::Goto(1, 1)
-            // )
-            // .unwrap();
-
-            // TODO: fix this so it properly "latches" and you can adjust speed while latched
             match c.unwrap() {
                 // Forward
                 Key::Char('i') => {
@@ -222,11 +210,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 Key::Char('u') => {
-                    pen_chr.write(&[b'1']).await.unwrap();
+                    pen_chr.write(BYTES_ONE).await.unwrap();
                 }
 
                 Key::Char('n') => {
-                    pen_chr.write(&[b'0']).await.unwrap();
+                    pen_chr.write(BYTES_ZERO).await.unwrap();
+                }
+
+                Key::Char('z') => {
+                    info!("Zero!");
+                    pose_x_chr.write(BYTES_ZERO).await.unwrap();
+                    pose_y_chr.write(BYTES_ZERO).await.unwrap();
+                    pose_theta_chr.write(BYTES_ZERO).await.unwrap();
                 }
 
                 // Increase speed by 10%
@@ -322,9 +317,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .expect("failed to convert pose.theta ascii to f32"),
                 );
                 let point = Vector2D::new(pose.x, pose.y);
-                println!("{},{}", point.x, point.y);
-                // info!("");
-                // info!("Pose = {}", pose);
                 let dist = point.distance(target_point);
                 if dist <= THESHOLD_DISTANCE {
                     break;
@@ -404,4 +396,5 @@ impl PidController {
         self.err_prev = error;
         self.kp * error + self.ki * self.i_err + self.ki * d_err
     }
+    const BYTES_ZERO: &[u8; 1] = &[b'0'];
 }
