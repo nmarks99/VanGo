@@ -31,6 +31,8 @@
 
         <!-- Custom theme stylesheets -->
 
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     </head>
     <body>
     <div id="body-container">
@@ -176,7 +178,7 @@ page while the robot is on the desired path, thus drawing the SVG image.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="control"><a class="header" href="#control">Control</a></h1>
 <p>VanGo's control architecture is comprised of a lower level speed control loop
 and a higher level trajectory tracking controller. From a user perspective, the lower level
-control loop can mostly be ignored, or at least treated as a black blox and not modified, while the
+control loop can mostly be ignored, or at least treated as a black box and not modified, while the
 higher level controller may leave more room for customization.</p>
 <h2 id="low-level-speed-controller"><a class="header" href="#low-level-speed-controller">Low-Level Speed Controller</a></h2>
 <p>Running on the ESP32 microcontroller, a timer based interrupt is resposible for reading the
@@ -187,17 +189,25 @@ was not worth the minimization of overshoot. Either way, both P and PD controlle
 speed control, and if one is preferred by the user, the gains may be adjusted in the firmware and reflashed to the board.
 For more information on editing and flashing firmware, see <a href="./dev.html">Development</a>.</p>
 <p>The two images below show the speed controller response for both the Proportional and Proportional-Derivative controllers.</p>
-<p><img src="./../images/p_speed_control.png" alt="Proportional control" /></p>
-<p><img src="./../images/pd_speed_control.png" alt="Proportional-Derivative control" /></p>
-<h2 id="todo-make-sure-this-ok-high-level-trajectory-controller"><a class="header" href="#todo-make-sure-this-ok-high-level-trajectory-controller">(TODO: Make sure this ok) High-Level Trajectory Controller</a></h2>
+<p><img src="./images/p_speed_control.png" alt="Proportional control" /></p>
+<p><img src="./images/pd_speed_control.png" alt="Proportional-Derivative control" /></p>
+<h2 id="high-level-trajectory-controller"><a class="header" href="#high-level-trajectory-controller">High-Level Trajectory Controller</a></h2>
 <p>The <code>vango-client</code> implements a trajectory tracking algorithm which is used to follow a trajectory defined
-by a set of waypoints. During development, there was a choice to be made regarding whether the the trajectory controller
-will operate on the client side or the firmware side. Both options have positives and negatives and will be briefly discussed
-below.</p>
+by a set of waypoints.</p>
+<p>There are many different trajectory tracking algorithms in existance, however at this time only one,and perhaps the most basic one,the PID controller, has been implemented for the VanGo robot. There are various ways a PID controller can be applied to the trajectory tracking problem, however the method I've chosen to implement is to use a PID controller for angular velocity control. To move the robot from its current (x, y) to some goal position which is presumably along the target path, the algorithm works as follows:</p>
+<ol>
+<li>Read the current pose (computed from wheel odometry) via BLE</li>
+<li>Compute the target angle as \(atan2(y_{goal} - y, x_{goal} - x)\)</li>
+<li>Let the error be the minimum angle between the robots current heading and the target heading</li>
+<li>Compute the control signal from the PID controller for the given error. This control signal is chosen to represent the angular velocity of the robot.</li>
+<li>The desired motion of the robot is then represented as a 2D twist (body velocity), using the computed target angular velocity, a constant x velocity of your choice, and a y velocity of 0.0 (which assumes no wheel slipping)</li>
+<li>Compute the left and right wheel speeds needed to achieve the target twist</li>
+</ol>
+<p>During development, there was a choice to be made regarding whether the trajectory controller
+will operate at the client application level or the firmware level. Both options have positives and negatives and will be briefly discussed below. In the end, it was chosen to operate the trajectory controller at the client application level.</p>
 <h3 id="client-side-trajectory-controller"><a class="header" href="#client-side-trajectory-controller">Client-Side Trajectory Controller</a></h3>
 <p>A client side trajectory controller works by implementing the trajectory tracking algorithm in the <code>vango-client</code>
-application. The controller will read information about the robot over bluetooth low-energy (BLE) such as the robot's current pose
-and wheel speeds, compute the necessary wheel speeds for tracking the desired trajectory, and send those target wheel
+application. The controller will obtain the robots current pose using bluetooth low-energy (BLE) and compute the necessary wheel speeds for tracking the desired trajectory, and send those target wheel
 speeds back to the robot over BLE.</p>
 <p><strong>Pros</strong></p>
 <ul>
@@ -205,10 +215,23 @@ speeds back to the robot over BLE.</p>
 <li>Easier to test different trajectory tracking algorithms or enable several algorithms to be available as options to the user</li>
 <li>Can take advantage of a client machine with higher computing power than the microcontroller</li>
 </ul>
-<p><strong>Cons TODO: CHECK</strong></p>
+<p><strong>Cons</strong></p>
 <ul>
 <li>Control loop speed is limited by BLE read/write latency. In it's current state, loop speeds top out around 30Hz.</li>
 </ul>
+<h3 id="firmware-side-trajectory-controller"><a class="header" href="#firmware-side-trajectory-controller">Firmware-Side Trajectory Controller</a></h3>
+<p>An alternative way to implement the trajectory tracking controller would be to implement the controller in the firmware on the microcontroller, obtaining the target path to follow from the client over BLE. Pros and Cons are listed below.</p>
+<p><strong>Pros</strong></p>
+<ul>
+<li>The MCU is capable of more precise and consistant timing through the use of hardware timers and interrupts</li>
+<li>BLE communication latency is no longer a concern since waypoints could be sent and processed beforehand</li>
+</ul>
+<p><strong>Cons</strong></p>
+<ul>
+<li>Resources are somewhat limited on the MCU and may impose practical limits of which algorithms can be employed</li>
+<li>Slower development time since for the most part, modifications to the trajectory tacking algorithm require reflashing the board</li>
+</ul>
+<p>Although performance/timing of the control loop could potentially be better if implemented in the MCU, it was determined that easy customization of algorithms as well as development time are key aspects of the project, therefore a client-side trajectory tracking algorithm was employed.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="communications"><a class="header" href="#communications">Communications</a></h1>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="development"><a class="header" href="#development">Development</a></h1>
 
@@ -249,7 +272,9 @@ speeds back to the robot over BLE.</p>
 
         <script>
         window.addEventListener('load', function() {
-            window.setTimeout(window.print, 100);
+            MathJax.Hub.Register.StartupHook('End', function() {
+                window.setTimeout(window.print, 100);
+            });
         });
         </script>
 
