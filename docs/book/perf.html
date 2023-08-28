@@ -171,7 +171,22 @@
                         <h1 id="performance"><a class="header" href="#performance">Performance</a></h1>
 <p>In its current stage, the VanGo drawing robot does not work well enough to draw
 consistent and accurace images, however with additional tuning, a more sophisticated
-trajectory tracking algorithm, and possibly additional sensors, </p>
+trajectory tracking algorithm, and possibly additional sensors, the performance will
+improve. Manual mode, which enables a user to manually drive the robot and move
+the marker up and down works as desired. Below the results of several tests are shown.</p>
+<h2 id="test-1-manual-mode-hi"><a class="header" href="#test-1-manual-mode-hi">Test 1: Manual Mode &quot;Hi&quot;</a></h2>
+<p>In the video linked below, I manually controlled the robot using the <code>vango-client</code>
+application to write &quot;Hi&quot;. This worked fairly well, but as you can see, driving the robot
+smoothly with the current controls is a bit challenging.</p>
+<p><a href="https://drive.google.com/file/d/1G3J-nfXMaDWAlqaTBmTTMUwiaXZAd-wS/view?usp=sharing">Test 1 Video</a></p>
+<h2 id="test-2-automatic-mode-triangle"><a class="header" href="#test-2-automatic-mode-triangle">Test 2: Automatic Mode &quot;Triangle&quot;</a></h2>
+<p>The video linked below performs a test of the robot in automatically mode
+attempting to draw a triangle. There is also a plot of the estimated x and y
+position of the robot from wheel odometry. As you can see the actual position
+of the robot is not very good, however the position estimate from odometry appears to be
+a bit better. This could potentially be due to wheel slipping.</p>
+<p><a href="https://drive.google.com/file/d/1G4sDGH2qyjXhTE3TqAN95uGIOtFKYngA/view?usp=drive_link">Test 2 Video</a></p>
+<p><img src="./images/triangle.png" /></p>
 
                     </main>
 

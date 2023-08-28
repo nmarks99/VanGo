@@ -1,8 +1,8 @@
 # Overview
 
 <p float="left">
-  <img src="./images/Vango1.jpg" width="30%" />
-  <img src="./images/Vango2.jpg" width="30%" /> 
+  <img src="./images/Vango1.jpg" width="28%" />
+  <img src="./images/Vango2.jpg" width="31%" /> 
   <img src="./images/Vango3.jpg" width="30%" />
 </p>
 

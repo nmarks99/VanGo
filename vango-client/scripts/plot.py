@@ -10,4 +10,5 @@ if file is None:
 traj = np.loadtxt(file, delimiter=",")
 fig, ax = plt.subplots()
 ax.scatter(traj[:,0], traj[:,1], color="blue")
+ax.set(xlabel="x(m)", ylabel="y(m)")
 plt.show()
