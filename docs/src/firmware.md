@@ -21,3 +21,4 @@ Below are the BLE characteristics provided by the robot and some information abo
 
 **Pen Characteristic** (WRITE):
 - Write: When '1' is written, raises the pen, when '0' is written, lowers the pen
+

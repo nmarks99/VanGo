@@ -1,5 +1,12 @@
 # VanGo: A Drawing Robot
 VanGo is a differential drive robot that can draw SVG images on a page.
+
+<p float="left">
+  <img src="./images/Vango1.jpg" width="30%" />
+  <img src="./images/Vango2.jpg" width="30%" /> 
+  <img src="./images/Vango3.jpg" width="30%" />
+</p>
+
 First, an SVG image is converted to XY coordinates using this online tool: [Coordinator](https://spotify.github.io/coordinator/).
 Then, using these XY coordinates, a trajectory of waypoints is generated for the robot to follow.
 Trajectory tracking is implemented using a simple PID steering control algorithm, and the robot determines its pose in space

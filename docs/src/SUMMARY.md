@@ -4,3 +4,4 @@
 - [Control](./control.md)
 - [Firmware](./firmware.md)
 - [Development](./dev.md)
+- [Performance](./perf.md)

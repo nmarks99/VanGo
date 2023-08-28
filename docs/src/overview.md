@@ -1,4 +1,11 @@
 # Overview
+
+<p float="left">
+  <img src="./images/Vango1.jpg" width="30%" />
+  <img src="./images/Vango2.jpg" width="30%" /> 
+  <img src="./images/Vango3.jpg" width="30%" />
+</p>
+
 VanGo is a differential drive robot for drawing SVG images. Put simply,
 VanGo is a wheeled mobile robot capable of trajectory tracking,
 with the added feature that the trajectory is generated from an SVG
