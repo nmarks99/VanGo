@@ -2,8 +2,8 @@
 VanGo is a differential drive robot that can draw SVG images on a page.
 
 <p float="left">
-  <img src="./docs/src/images/Vango1.jpg" width="30%" />
-  <img src="./docs/src/images/Vango2.jpg" width="30%" /> 
+  <img src="./docs/src/images/Vango1.jpg" width="28%" />
+  <img src="./docs/src/images/Vango2.jpg" width="32%" /> 
   <img src="./docs/src/images/Vango3.jpg" width="30%" />
 </p>
 
