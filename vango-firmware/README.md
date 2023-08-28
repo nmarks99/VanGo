@@ -10,5 +10,4 @@ install to setup a development environment.
 To build and flash the code run the following
 ```
 source export-esp.sh # source ESP toolchain
-cargo espflash       # build and flash
-```
+cargo flash # build and flash with custom partition table (see alias in .cargo/config.toml/)
