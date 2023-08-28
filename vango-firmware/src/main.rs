@@ -403,8 +403,6 @@ fn main() -> anyhow::Result<()> {
     let mut color_index: usize = 0;
     let mut count = 0;
 
-    // let target_pose = Pose2D::new(0.0, 0.0, -3.14159);
-    // const SPEED: f32 = 2.5;
     loop {
         // If the values have been updated, compute the pose from odometry
         let isr_flag = ISR_FLAG.load(Ordering::Relaxed);
@@ -415,25 +413,6 @@ fn main() -> anyhow::Result<()> {
                 RIGHT_ANGLE.load(Ordering::Relaxed),
             );
             let pose = robot.forward_kinematics(wheel_angles);
-
-            // if utils::almost_equal(pose.theta, target_pose.theta, 0.05) {
-            //     log::info!(
-            //         "Target reached!\nCurrent={}, Target={}",
-            //         pose.theta,
-            //         target_pose.theta
-            //     );
-            //     TARGET_SPEED_LEFT.store(0.0, Ordering::Relaxed);
-            //     TARGET_SPEED_RIGHT.store(0.0, Ordering::Relaxed);
-            // } else {
-            //     let dir = utils::get_rotation_direction(pose.theta, target_pose.theta);
-            //     if dir {
-            //         TARGET_SPEED_LEFT.store(SPEED, Ordering::Relaxed);
-            //         TARGET_SPEED_RIGHT.store(-SPEED, Ordering::Relaxed);
-            //     } else {
-            //         TARGET_SPEED_LEFT.store(-SPEED, Ordering::Relaxed);
-            //         TARGET_SPEED_RIGHT.store(SPEED, Ordering::Relaxed);
-            //     }
-            // }
 
             POSE_X.store(pose.x, Ordering::Relaxed);
             POSE_Y.store(pose.y, Ordering::Relaxed);
