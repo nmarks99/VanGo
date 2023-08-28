@@ -329,16 +329,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     target_point.y - point.y,
                     target_point.x - point.x,
                 ));
-                // info!("Distance to target = {}", dist);
-                // info!("Target angle = {}", rad2deg(target_angle));
 
                 // Compute angular speed from controller
                 let err = get_min_angle(target_angle, pose.theta);
                 let u = controller.compute(err); // u is thetadot
                 let speeds = robot.speeds_from_twist(Twist2D::new(u, 0.05, 0.0));
-                // info!("err = {}", rad2deg(err));
-                // info!("u = {}", u);
-                // info!("Speeds = {}", speeds);
 
                 // Set wheel speeds
                 let left_speed_bytes = f32_to_ascii(speeds.left);
@@ -352,10 +347,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .await
                     .expect("set right speed failed");
             }
-
-            // left_speed_chr.write(&[b'0']).await.unwrap();
-            // right_speed_chr.write(&[b'0']).await.unwrap();
-            // info!("Target {} reached!\n\n", count);
             count += 1;
         }
         info!("Done!");
