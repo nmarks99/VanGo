@@ -287,19 +287,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // let path = Path::semi_circle(0.2, 50);
         // let path_vec = path.to_vec();
         let path_vec = vec![
-            Vector2D::new(0.0, 0.5),
-            Vector2D::new(0.5, 0.5),
-            Vector2D::new(0.5, 0.0),
+            // Vector2D::new(0.0, 0.3),
+            Vector2D::new(0.2, 0.2),
+            Vector2D::new(0.2, 0.0),
             Vector2D::new(0.0, 0.0),
         ];
 
         const KP: f32 = 1.4;
-        const KI: f32 = 0.0075;
-        const KD: f32 = 0.2;
+        const KI: f32 = 0.0;
+        const KD: f32 = 0.1;
         const THESHOLD_DISTANCE: f32 = 0.01;
         let mut controller = PidController::new(KP, KI, KD);
         let robot = DiffDrive::new(WHEEL_RADIUS, WHEEL_SEPARATION);
         let mut count = 1;
+
+        pen_chr.write(BYTES_ZERO).await.unwrap();
         for target_point in path_vec {
             loop {
                 // get current pose of the robot
@@ -317,6 +319,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .expect("failed to convert pose.theta ascii to f32"),
                 );
                 let point = Vector2D::new(pose.x, pose.y);
+                println!("{},{}", point.x, point.y);
                 let dist = point.distance(target_point);
                 if dist <= THESHOLD_DISTANCE {
                     break;
@@ -356,6 +359,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             count += 1;
         }
         info!("Done!");
+        pen_chr.write(BYTES_ONE).await.unwrap();
         left_speed_chr
             .write(&[b'0'])
             .await
@@ -396,5 +400,4 @@ impl PidController {
         self.err_prev = error;
         self.kp * error + self.ki * self.i_err + self.ki * d_err
     }
-    const BYTES_ZERO: &[u8; 1] = &[b'0'];
 }
