@@ -2,5 +2,5 @@
 
 - [Overview](./overview.md)
 - [Control](./control.md)
-- [Communications](./comms.md)
+- [Firmware](./firmware.md)
 - [Development](./dev.md)
